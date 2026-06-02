@@ -1,85 +1,111 @@
-# Design Document — Store Intelligence Platform
+# Store Intelligence System Design
 
-## Overview
+## Architecture Overview
 
-This system converts anonymised retail CCTV footage into actionable store intelligence for Apex Retail's offline channel. The architecture follows a four-stage pipeline aligned with the challenge specification: **Detection → Event Stream → Intelligence API → Live Dashboard**.
+The system is built as an **event-driven pipeline** that separates heavy computer vision from low-latency API serving:
 
-The Brigade Bangalore store (`STORE_BLR_002`, legacy POS id `ST1008`) is modelled using five camera angles mapped to entry, floor, billing, and overlap coverage defined in `data/store_layout.json`. POS transactions from the provided Brigade CSV are normalised into `data/pos_transactions.csv` for conversion-rate correlation.
+1. **Vision Node (GPU-bound)**
+   - Runs YOLOv8 tracking and zone/event generation from CCTV streams.
+   - Performs staff detection and zone assignment per tracked person.
+   - Publishes normalized events to Redis Pub/Sub (`store_events`).
 
-## Architecture
+2. **Realtime/Event Bus (Redis Pub/Sub)**
+   - Works as the decoupling layer between producers (vision) and consumers (API/dashboard).
+   - Buffers flow via asynchronous publish/subscribe patterns.
+   - Allows independent scaling of vision workers and API/websocket workers.
 
-```
-CCTV Clips (camera1-5.mp4)
-        │
-        ▼
-┌───────────────────────┐
-│  pipeline/detect.py   │  YOLOv8n person detection + ByteTrack
-│  pipeline/tracker.py  │  Zone polygons, entry line, re-entry registry
-│  pipeline/emit.py     │  Canonical event schema emission
-└───────────┬───────────┘
-            │ JSONL / HTTP batches
-            ▼
-┌───────────────────────┐
-│  POST /events/ingest  │  Validation, dedup by event_id, SQLite storage
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────────────────────────────┐
-│  Analytics Layer                               │
-│  metrics.py   → visitors, conversion, dwell    │
-│  funnel.py    → session-based funnel           │
-│  analytics.py → heatmap + anomalies            │
-│  health.py    → stale feed detection           │
-└───────────┬───────────────────────────────────┘
-            │
-            ▼
-┌───────────────────────┐
-│  dashboard/           │  Web UI (8501) + Rich terminal dashboard
-└───────────────────────┘
-```
+3. **FastAPI Intelligence Layer (CPU/lightweight)**
+   - Consumes event stream and ingests validated records.
+   - Computes metrics/funnel/heatmap/anomalies.
+   - Serves dashboards and APIs without waiting on GPU inference.
 
-## Detection Layer
+This separation ensures the API remains responsive even when vision inference load spikes, while GPU nodes can process frames at their own throughput.
 
-The detection pipeline uses **YOLOv8n** for person detection with built-in **ByteTrack** tracking. Each track receives a visitor token from a lightweight re-identification registry that hashes bounding-box size and torso colour. When a person exits and returns within 45 minutes, a `REENTRY` event is emitted instead of a duplicate `ENTRY`.
+---
 
-Zone classification is rule-based: camera-specific polygons (normalised coordinates) determine whether a visitor enters SKINCARE, MAKEUP, HAIR, FRAGRANCE, ACCESSORIES, BILLING, or ENTRY zones. Dwell events fire every 30 seconds of continuous presence. Staff are detected via purple uniform hue in HSV space and extended billing-zone presence; staff events are flagged `is_staff=true`.
+## Engineering Trade-offs
 
-Entry and exit are detected on `CAM_ENTRY_01` using a configurable threshold line. Overlap camera `CAM_FLOOR_03` deduplicates redundant entry events.
+### Why HSV color masking for staff classification (instead of a separate NN classifier)
 
-## Event Stream
+Staff identification uses HSV-based masking plus contextual rules because:
 
-Events conform to the required schema with UUID `event_id`, ISO-8601 UTC timestamps derived from clip start + frame offset, and metadata for queue depth, SKU zone labels, and session sequence numbers. Low-confidence detections are retained rather than silently dropped.
+- **Compute efficiency:** HSV thresholding is extremely cheap compared with running a second neural network per detection.
+- **Deterministic behavior:** The uniform policy is strict (black apparel), and the HSV mask is calibrated to the observed hue band in footage (including purple-tinted appearance under lighting), yielding predictable and auditable outcomes.
+- **Operational simplicity:** No labelled staff dataset, retraining pipeline, or model version management is required.
+- **Real-time suitability:** Keeps latency low on edge hardware where YOLO already consumes most inference budget.
 
-## Intelligence API
+A dedicated classifier could improve generalization in varied uniforms, but for the current black-uniform constraint, HSV heuristics provide the best speed-to-reliability trade-off.
 
-FastAPI serves REST endpoints backed by **SQLite** via SQLAlchemy async. Ingestion is idempotent on `event_id` and supports partial success for malformed events. Metrics exclude staff sessions. Conversion rate correlates billing-zone presence within a five-minute window before POS transaction timestamps.
+### Why normalized polygon coordinates
 
-Anomaly detection covers billing queue spikes, conversion drops versus rolling baseline, and dead zones with no activity for 30 minutes. The health endpoint reports per-store last-event timestamps and raises `STALE_FEED` warnings after ten minutes of lag.
+Zone polygons are stored in normalized coordinates (`0.0–1.0`) instead of raw pixels because:
 
-## Production Concerns
+- **Resolution independence:** The same layout works across 720p/1080p/4K inputs.
+- **Camera portability:** Geometry remains valid when stream dimensions or transcoding settings change.
+- **Config reuse:** One zone definition can be shared across environments and devices.
 
-- Structured JSON logging with `trace_id`, `store_id`, endpoint, latency, and ingest batch size
-- Docker Compose for one-command deployment
-- Graceful 503 responses when database availability flag is disabled
-- Pytest coverage across ingest, metrics, funnel, anomalies, and pipeline helpers
+At runtime, normalized vertices are converted to frame pixels for point-in-polygon checks.
 
-## AI-Assisted Decisions
+---
 
-1. **Zone mapping strategy** — I asked an LLM to propose zone polygons from the Brigade layout diagram. The model suggested fine-grained brand-level zones (Maybelline, Faces Canada, etc.). I **overrode** this to coarser merchandising categories (SKINCARE, MAKEUP, HAIR) because the CCTV angles cannot reliably resolve individual brand bays; coarser zones improve robustness and still support heatmap and funnel analytics.
+## Edge Case Handling
 
-2. **Staff detection approach** — AI recommended a dedicated uniform classifier trained on labelled staff clips. Without labelled staff data, I **rejected** full classifier training and implemented a pragmatic HSV purple-ratio heuristic plus billing-station persistence. This trades precision for zero-shot deployability and explicit `is_staff` flags.
+### Occlusion mitigation
 
-3. **Test generation** — Copilot-style prompts generated the initial pytest skeleton. I **edited** tests to include prompt/change headers required by the challenge, added idempotency and partial-success cases, and removed brittle hard-coded anomaly counts that would fail across dates.
+Occlusions (people partially/temporarily hidden) are reduced using:
 
-## Data Assets
+- Persistent multi-object tracking IDs from the detector tracker.
+- Short lost-track grace windows before finalizing disappearance.
+- Zone transition logic driven by trajectory history instead of single-frame state.
 
-| File | Purpose |
-|---|---|
-| `data/store_layout.json` | Cameras, zones, entry line, clip timestamps |
-| `data/pos_transactions.csv` | Normalised POS for conversion correlation |
-| `data/sample_events.jsonl` | Seed events for API bootstrapping and tests |
-| `data/pos_raw.csv` | Original Brigade POS export |
+This avoids excessive entry/exit churn when a shopper is briefly blocked by fixtures or crowds.
 
-## North Star Alignment
+### ID switching mitigation
 
-Every design choice supports **offline conversion rate** accuracy and actionability: detection quality affects visitor counts, POS correlation affects conversion, funnel/heatmap expose drop-offs, and anomalies trigger operational responses (queue staffing, merchandising checks, feed monitoring).
+Cross-frame ID instability is mitigated by:
+
+- Track aliasing/merge logic using spatial proximity and short temporal windows.
+- Lightweight appearance signatures for re-identification continuity.
+- Overlap-camera entry deduplication to prevent duplicate ENTRY/REENTRY inflation.
+
+Together, these controls reduce duplicate visitors caused by tracker identity swaps.
+
+### Mathematical exclusion of staff from conversion metrics
+
+Staff exclusion is explicit in metric math:
+
+- Sessions where `is_staff=True` are removed from visitor denominator sets.
+- Billing/queue/buy-intent events with `is_staff=True` are ignored for conversion attribution.
+- Funnel, heatmap, queue depth, abandonment, and occupancy calculations apply the same filter.
+
+So the conversion formula is effectively:
+
+`conversion_rate = converted_customers / unique_customers`
+
+where both numerator and denominator are computed on **customer-only** sessions.
+
+---
+
+## Scalability to 40 Stores
+
+The architecture scales horizontally by splitting control-plane and edge inference responsibilities.
+
+### Cloud-side scaling
+
+- Move Redis from local deployment to a **managed cloud cache** (e.g., Redis service with high availability (HA), persistence options, monitoring, and autoscaling).
+- Run multiple FastAPI replicas behind a load balancer, all consuming/publishing through managed Redis.
+- Keep APIs stateless; persist historical events/analytics in centralized data storage.
+
+### Edge-side scaling (Surat and Bangalore)
+
+- Deploy vision workers on store-local edge devices in Surat/Bangalore for low-latency video access.
+- Each edge node performs YOLO inference locally and publishes compact event messages upstream.
+- WAN traffic stays lightweight (events, not raw video), reducing bandwidth and central GPU cost.
+
+### Multi-store operation model
+
+- Namespace event streams by `store_id` and camera IDs.
+- Use per-store consumer groups/services for isolation and fault containment.
+- Add observability (lag, dropped events, per-store throughput, stale feed alerts).
+
+With this model, scaling from 1 to 40 stores is mostly operational (more edge workers + managed Redis/API replicas), without redesigning core application logic.
