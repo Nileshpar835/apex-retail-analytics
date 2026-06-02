@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Store Intelligence Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; }
+    header { padding: 20px 28px; background: #111827; border-bottom: 1px solid #334155; }
+    header h1 { margin-bottom: 8px; }
+    header p { color: #94a3b8; font-size: 0.9em; }
+    
+    .container { display: grid; grid-template-columns: 1fr; gap: 24px; padding: 24px; }
+    .section { background: #1e293b; border-radius: 12px; padding: 20px; }
+    .section h2 { font-size: 1.1em; margin-bottom: 16px; color: #cbd5e1; }
+    
+    .cameras-grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); 
+      gap: 16px; 
+    }
+    .camera-item { 
+      background: #0f172a; border-radius: 8px; overflow: hidden; 
+      border: 1px solid #334155; 
+    }
+    .camera-name { 
+      background: #111827; padding: 8px 12px; font-weight: 600; 
+      font-size: 0.9em; color: #38bdf8; 
+    }
+    .camera-feed-container {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      background: #000;
+    }
+    .camera-feed { 
+      width: 100%; height: 100%; background: #000; 
+      object-fit: contain; display: block; 
+    }
+    .camera-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    .camera-detections { 
+      padding: 10px; max-height: 120px; overflow-y: auto; 
+      font-size: 0.85em; 
+    }
+    .detection-badge { 
+      display: inline-block; background: #38bdf8; color: #0f172a; 
+      padding: 2px 8px; border-radius: 12px; margin: 2px; 
+      font-weight: 600; 
+    }
+    
+    .metrics-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    .metric-card { background: #0f172a; border-radius: 8px; padding: 14px; }
+    .metric-card .label { color: #94a3b8; font-size: 0.85em; margin-bottom: 6px; }
+    .metric-card .value { font-size: 1.6em; font-weight: 700; color: #38bdf8; }
+    
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 24px; }
+    .health-section { grid-column: 1; }
+    .funnel-section { grid-column: 2; }
+    .detections-section { grid-column: 3; }
+    .tracking-section { grid-column: 4; }
+    
+    .stat-list ul { list-style: none; }
+    .stat-list li { padding: 8px 0; border-bottom: 1px solid #334155; font-size: 0.95em; }
+    .stat-list li:last-child { border-bottom: none; }
+    
+    .funnel-list ul { list-style: none; }
+    .funnel-list li { padding: 8px 0; border-bottom: 1px solid #334155; }
+    .funnel-list li:last-child { border-bottom: none; }
+    
+    .detection-item { 
+      background: #0f172a; padding: 10px; margin-bottom: 8px; 
+      border-radius: 4px; border-left: 3px solid #38bdf8; 
+    }
+    .detection-class { font-weight: 600; color: #38bdf8; }
+    .detection-confidence { color: #94a3b8; font-size: 0.85em; }
+    
+    .status-ok { color: #4ade80; }
+    .status-warn { color: #fbbf24; }
+    .status-error { color: #f87171; }
+    
+    .loading { text-align: center; color: #94a3b8; padding: 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Brigade Bangalore · Live Store Intelligence</h1>
+    <p id="updated">Connecting…</p>
+  </header>
+  
+  <div class="container">
+    <!-- All Camera Feeds Section -->
+    <div class="section">
+      <h2>Live Camera Feeds</h2>
+      <div class="cameras-grid" id="camerasContainer">
+        <div class="loading">Loading cameras...</div>
+      </div>
+    </div>
+    
+    <!-- Key Metrics Section -->
+    <div class="section">
+      <h2>Key Metrics</h2>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="label">Current Persons</div>
+          <div class="value" id="current-persons" style="color: #22c55e;">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Current Staff</div>
+          <div class="value" id="current-staff" style="color: #f59e0b;">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Unique Visitors</div>
+          <div class="value" id="visitors">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Conversion Rate</div>
+          <div class="value" id="conversion">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Queue Depth</div>
+          <div class="value" id="queue">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Abandonment Rate</div>
+          <div class="value" id="abandon">-</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Bottom Stats: Health, Funnel, Detections -->
+    <div class="stats-grid">
+      <!-- System Health -->
+      <div class="section health-section">
+        <h2>System Health</h2>
+        <div style="padding: 14px; background: #0f172a; border-radius: 8px;">
+          <div class="label">Status</div>
+          <div class="value" id="health" style="margin-top: 8px;">-</div>
+          <ul id="warnings" style="margin-top: 12px; list-style: none;"></ul>
+        </div>
+      </div>
+      
+      <!-- Customer Funnel -->
+      <div class="section funnel-section">
+        <h2>Customer Funnel</h2>
+        <div class="funnel-list">
+          <ul id="funnel"></ul>
+        </div>
+      </div>
+      
+      <!-- Live Detections Summary -->
+      <div class="section detections-section">
+        <h2>Detection Summary</h2>
+        <div id="detections" class="loading">Loading detections...</div>
+      </div>
+      
+      <!-- Person Tracking -->
+      <div class="section tracking-section">
+        <h2>Person Tracking</h2>
+        <div style="padding: 14px; background: #0f172a; border-radius: 8px;">
+          <div style="margin-bottom: 12px;">
+            <div class="label">Active Tracked</div>
+            <div class="value" id="tracked-count" style="color: #22c55e; margin-top: 4px;">0</div>
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div class="label">Auto-Detected Staff</div>
+            <div class="value" id="staff-count" style="color: #ef4444; margin-top: 4px;">0</div>
+          </div>
+          <div>
+            <div class="label">Deduplication Method</div>
+            <div style="font-size: 0.85em; color: #94a3b8; margin-top: 4px;">
+              Appearance-based visual similarity
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const storeId = 'STORE_BLR_002';
+    const apiBase = window.location.origin.replace(':8501', ':8000');
+    let allCameras = [];
+    let allDetections = {};
+    let storeLayout = null;
+    let cameraCanvases = {};
+    
+    // Color palette for different zones
+    const zoneColors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+      '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#B3E5FC'
+    ];
+    
+    function hexToRgba(hex, alpha) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    
+    function getZoneColor(zoneId, index) {
+      return zoneColors[index % zoneColors.length];
+    }
+    
+    async function loadStoreLayout() {
+      try {
+        const res = await fetch(`${apiBase}/store-layout`);
+        storeLayout = await res.json();
+        console.log('Store layout loaded:', storeLayout);
+        return storeLayout;
+      } catch (e) {
+        console.error('Failed to load store layout:', e);
+        return null;
+      }
+    }
+    
+    function drawPolygonsOnCanvas(canvasId, cameraId) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) {
+        console.warn(`Canvas ${canvasId} not found`);
+        return;
+      }
+      if (!storeLayout) {
+        console.warn('Store layout not loaded');
+        return;
+      }
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        console.warn('Canvas context not available');
+        return;
+      }
+      
+      // Find camera in store layout
+      const store = storeLayout.stores?.[0];
+      if (!store) {
+        console.warn('No store found in layout');
+        return;
+      }
+      
+      const camera = store.cameras?.find(c => c.camera_id === cameraId);
+      if (!camera) {
+        console.warn(`Camera ${cameraId} not found`);
+        return;
+      }
+      if (!camera.zones || camera.zones.length === 0) {
+        console.log(`No zones for camera ${cameraId}`);
+        return;
+      }
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Get canvas dimensions
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      if (width === 0 || height === 0) {
+        console.warn(`Canvas dimensions invalid: ${width}x${height}`);
+        return;
+      }
+      
+      console.log(`Drawing ${camera.zones.length} zones on ${cameraId} (${width}x${height})`);
+      
+      // Draw zones
+      camera.zones.forEach((zone, index) => {
+        if (!zone.polygon || zone.polygon.length < 2) return;
+        
+        const color = getZoneColor(zone.zone_id, index);
+        const fillColor = hexToRgba(color, 0.15);
+        
+        // Convert normalized coordinates to canvas pixels
+        const points = zone.polygon.map(([x, y]) => [
+          x * width,
+          y * height
+        ]);
+        
+        // Draw polygon
+        ctx.strokeStyle = color;
+        ctx.fillStyle = fillColor;
+        ctx.lineWidth = 2;
+        
+        ctx.beginPath();
+        ctx.moveTo(points[0][0], points[0][1]);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i][0], points[i][1]);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        
+        // Draw zone label
+        const centerX = points.reduce((sum, p) => sum + p[0], 0) / points.length;
+        const centerY = points.reduce((sum, p) => sum + p[1], 0) / points.length;
+        
+        ctx.fillStyle = color;
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 3;
+        ctx.fillText(zone.zone_id, centerX, centerY - 8);
+        
+        ctx.fillStyle = '#ccc';
+        ctx.font = '10px Arial';
+        ctx.fillText(zone.sku_zone || '', centerX, centerY + 8);
+        ctx.shadowColor = 'transparent';
+      });
+    }
+    
+    async function initCameras() {
+      try {
+        const res = await fetch(`${apiBase}/cameras`);
+        const data = await res.json();
+        allCameras = data.cameras || [];
+        
+        const container = document.getElementById('camerasContainer');
+        if (allCameras.length > 0) {
+          container.innerHTML = allCameras.map((cam, idx) => {
+            const canvasId = `overlay-${cam.replace(/[^a-z0-9]/gi, '')}-${idx}`;
+            return `
+              <div class="camera-item">
+                <div class="camera-name">${cam}</div>
+                <div class="camera-feed-container">
+                  <img class="camera-feed" src="${apiBase}/cameras/${encodeURIComponent(cam)}/feed" alt="${cam}" id="img-${cam}" />
+                  <canvas class="camera-overlay" id="${canvasId}"></canvas>
+                </div>
+                <div class="camera-detections" id="detections-${cam}">
+                  <span style="color: #94a3b8;">Loading...</span>
+                </div>
+              </div>
+            `;
+          }).join('');
+          
+          // Setup canvas overlays after DOM is ready
+          setTimeout(() => {
+            allCameras.forEach((cam, idx) => {
+              const img = document.getElementById(`img-${cam}`);
+              const canvasId = `overlay-${cam.replace(/[^a-z0-9]/gi, '')}-${idx}`;
+              const canvas = document.getElementById(canvasId);
+              
+              if (img && canvas) {
+                function resizeAndDraw() {
+                  const rect = img.parentElement.getBoundingClientRect();
+                  canvas.width = rect.width;
+                  canvas.height = rect.height;
+                  console.log(`Resized canvas ${canvasId} to ${rect.width}x${rect.height}`);
+                  drawPolygonsOnCanvas(canvasId, cam);
+                }
+                
+                // Resize when image loads
+                if (img.complete) {
+                  // Image already loaded
+                  resizeAndDraw();
+                } else {
+                  img.onload = resizeAndDraw;
+                }
+                
+                // Resize on window resize
+                window.addEventListener('resize', resizeAndDraw);
+                
+                // Initial resize
+                setTimeout(resizeAndDraw, 100);
+                
+                // Store for later redraw
+                cameraCanvases[cam] = canvasId;
+              }
+            });
+          }, 100);
+        } else {
+          container.innerHTML = '<div class="loading">No cameras available</div>';
+        }
+      } catch (e) {
+        console.error('Failed to load cameras:', e);
+        document.getElementById('camerasContainer').innerHTML = 
+          '<div class="loading">Failed to load cameras</div>';
+      }
+    }
+    
+    async function refreshMetrics() {
+      try {
+        const [metrics, funnel, health, tracking] = await Promise.all([
+          fetch(`${apiBase}/stores/${storeId}/metrics`).then(r => r.json()),
+          fetch(`${apiBase}/stores/${storeId}/funnel`).then(r => r.json()),
+          fetch(`${apiBase}/health`).then(r => r.json()),
+          fetch(`${apiBase}/tracking/stats`).then(r => r.json()),
+        ]);
+        
+        // Update new occupancy metrics
+        document.getElementById('current-persons').textContent = metrics.current_persons || 0;
+        document.getElementById('current-staff').textContent = metrics.current_staff || 0;
+        
+        document.getElementById('visitors').textContent = metrics.unique_visitors;
+        document.getElementById('conversion').textContent = 
+          `${(metrics.conversion_rate * 100).toFixed(2)}%`;
+        document.getElementById('queue').textContent = metrics.queue_depth;
+        document.getElementById('abandon').textContent = 
+          `${(metrics.abandonment_rate * 100).toFixed(2)}%`;
+        document.getElementById('funnel').innerHTML = 
+          funnel.stages.map(s => `<li>${s.stage}: ${s.count}</li>`).join('');
+        document.getElementById('health').textContent = health.status;
+        document.getElementById('health').className = 
+          `value ${health.status === 'OK' ? 'status-ok' : 'status-warn'}`;
+        document.getElementById('warnings').innerHTML = 
+          (health.warnings || []).map(w => `<li>⚠ ${w}</li>`).join('');
+        
+        // Update tracking info - use real-time tracker data
+        document.getElementById('tracked-count').textContent = 
+          tracking.total_unique_persons_tracked || 0;
+        document.getElementById('staff-count').textContent = 
+          tracking.staff_count || 0;
+        
+        document.getElementById('updated').textContent = 
+          `Last updated ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        console.error('Failed to refresh metrics:', e);
+      }
+    }
+    
+    async function refreshAllDetections() {
+      try {
+        const detectionPromises = allCameras.map(cam => 
+          fetch(`${apiBase}/cameras/${encodeURIComponent(cam)}/detections`)
+            .then(r => r.json())
+            .then(data => ({ camera: cam, detections: data.detections || [] }))
+            .catch(() => ({ camera: cam, detections: [] }))
+        );
+        
+        const results = await Promise.all(detectionPromises);
+        let totalDetections = {};
+        
+        results.forEach(({ camera, detections }) => {
+          const detDiv = document.getElementById(`detections-${camera}`);
+          if (detections.length > 0) {
+            const classes = {};
+            detections.forEach(d => {
+              classes[d.class] = (classes[d.class] || 0) + 1;
+            });
+            detDiv.innerHTML = Object.entries(classes)
+              .map(([cls, count]) => `<span class="detection-badge">${cls} ×${count}</span>`)
+              .join('');
+            
+            Object.entries(classes).forEach(([cls, count]) => {
+              totalDetections[cls] = (totalDetections[cls] || 0) + count;
+            });
+          } else {
+            detDiv.innerHTML = '<span style="color: #94a3b8; font-size: 0.8em;">No detections</span>';
+          }
+        });
+        
+        // Update summary
+        const summaryDiv = document.getElementById('detections');
+        if (Object.keys(totalDetections).length > 0) {
+          summaryDiv.innerHTML = Object.entries(totalDetections)
+            .map(([cls, count]) => 
+              `<div class="detection-item">
+                <div class="detection-class">${cls}</div>
+                <div class="detection-confidence">Total detected: ${count}</div>
+              </div>`
+            ).join('');
+        } else {
+          summaryDiv.innerHTML = '<div class="loading">No objects detected across all cameras</div>';
+        }
+      } catch (e) {
+        console.error('Failed to refresh detections:', e);
+      }
+    }
+    
+    async function init() {
+      console.log('Initializing dashboard...');
+      await loadStoreLayout();
+      await initCameras();
+      refreshMetrics();
+      refreshAllDetections();
+      
+      // Redraw polygons periodically in case canvas gets cleared
+      const redrawInterval = setInterval(() => {
+        Object.entries(cameraCanvases).forEach(([cam, canvasId]) => {
+          drawPolygonsOnCanvas(canvasId, cam);
+        });
+      }, 3000);
+      
+      console.log('Dashboard initialized');
+    }
+    
+    init();
+    setInterval(refreshMetrics, 3000);
+    setInterval(refreshAllDetections, 1000);
+  </script>
+</body>
+</html>

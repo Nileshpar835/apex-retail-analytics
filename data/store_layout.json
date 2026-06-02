@@ -1,0 +1,107 @@
+{
+  "stores": [
+    {
+      "store_id": "STORE_BLR_002",
+      "store_name": "Brigade_Bangalore",
+      "legacy_store_id": "ST1008",
+      "city": "Bangalore",
+      "open_hours": {
+        "start": "10:00",
+        "end": "22:00",
+        "timezone": "Asia/Kolkata"
+      },
+      "cameras": [
+        {
+          "camera_id": "CAM 1",
+          "role": "floor",
+          "name": "LEFT Zone - Skincare",
+          "video_file": "CAM 1.mp4",
+          "clip_start_utc": "2026-04-10T06:30:00Z",
+          "zones": [
+            {
+              "zone_id": "SKINCARE_LEFT",
+              "sku_zone": "SKINCARE_PRODUCTS",
+              "polygon": [[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]]
+            }
+          ]
+        },
+        {
+          "camera_id": "CAM 2",
+          "role": "floor",
+          "name": "RIGHT Wall - Makeup & Other Zones",
+          "video_file": "CAM 2.mp4",
+          "clip_start_utc": "2026-04-10T06:30:00Z",
+          "zones": [
+            {
+              "zone_id": "MAKEUP",
+              "sku_zone": "MAKEUP_PRODUCTS",
+              "polygon": [[0.5, 0.0], [1.0, 0.0], [1.0, 0.5], [0.5, 0.5]]
+            },
+            {
+              "zone_id": "FRAGRANCE",
+              "sku_zone": "FRAGRANCE_ZONE",
+              "polygon": [[0.5, 0.5], [1.0, 0.5], [1.0, 1.0], [0.5, 1.0]]
+            }
+          ]
+        },
+        {
+          "camera_id": "CAM 3",
+          "role": "entry_exit",
+          "name": "ENTRY/EXIT",
+          "video_file": "CAM 3.mp4",
+          "clip_start_utc": "2026-04-10T06:30:00Z",
+          "entry_line": {
+            "x1": 0.35,
+            "y1": 0.72,
+            "x2": 0.75,
+            "y2": 0.72,
+            "inbound_direction": "up"
+          },
+          "zones": [
+            {
+              "zone_id": "ENTRY_EXIT",
+              "sku_zone": "FOYER",
+              "polygon": [[0.2, 0.6], [0.8, 0.6], [0.8, 1.0], [0.2, 1.0]]
+            }
+          ]
+        },
+        {
+          "camera_id": "CAM 4",
+          "role": "backroom",
+          "name": "Backroom/Warehouse (Staff Only)",
+          "video_file": "CAM 4.mp4",
+          "clip_start_utc": "2026-04-10T06:30:00Z",
+          "zones": [
+            {
+              "zone_id": "BACKROOM",
+              "sku_zone": "STAFF_AREA",
+              "polygon": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
+            }
+          ]
+        },
+        {
+          "camera_id": "CAM 5",
+          "role": "billing",
+          "name": "BILLING/CHECKOUT",
+          "video_file": "CAM 5.mp4",
+          "clip_start_utc": "2026-04-10T06:30:00Z",
+          "zones": [
+            {
+              "zone_id": "CHECKOUT",
+              "sku_zone": "BILLING_COUNTER",
+              "polygon": [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
+            }
+          ]
+        }
+      ],
+      "zones": [
+        {"zone_id": "SKINCARE_LEFT", "sku_zone": "SKINCARE_PRODUCTS"},
+        {"zone_id": "MAKEUP", "sku_zone": "MAKEUP_PRODUCTS"},
+        {"zone_id": "FRAGRANCE", "sku_zone": "FRAGRANCE_ZONE"},
+        {"zone_id": "ENTRY_EXIT", "sku_zone": "FOYER"},
+        {"zone_id": "BACKROOM", "sku_zone": "STAFF_AREA"},
+        {"zone_id": "CHECKOUT", "sku_zone": "BILLING_COUNTER"}
+      ]
+    }
+  ]
+}
