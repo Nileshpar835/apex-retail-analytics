@@ -15,6 +15,7 @@ docker compose up --build
 Open:
 - API docs: http://localhost:8000/docs
 - Live dashboard: http://localhost:8501
+- React dashboard: http://localhost:5173
 - Metrics: http://localhost:8000/stores/STORE_BLR_002/metrics
 
 ## Run Detection Pipeline on CCTV Clips
@@ -59,6 +60,31 @@ $env:FAST_MODE="1"; .\pipeline\run.ps1
 | `GET /stores/{id}/heatmap` | Zone intensity normalized 0–100 |
 | `GET /stores/{id}/anomalies` | Queue spike, conversion drop, dead zones |
 | `GET /health` | Service health + stale feed warnings |
+| `GET /ws/dashboard` | WebSocket stream with 1s batches of raw events + Redis analytics |
+
+## Real-Time Redis Stream
+
+The API publishes and consumes realtime events via Redis Pub/Sub channel `store_events`.
+
+- Simulated publisher reads VisionEngine JSON lines from `data/store_events.jsonl`.
+- Aggregator maintains `active_footfall`, `queue_length`, and `zone_occupancy` in Redis.
+- WebSocket clients connect at `ws://localhost:8000/ws/dashboard`.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for Pub/Sub and metrics |
+| `VISION_EVENTS_PATH` | `data/store_events.jsonl` | JSONL stream input for simulator |
+| `REALTIME_PUBLISH_INTERVAL_SECONDS` | `0.2` | Publish frequency for simulated events |
+
+## React Live Dashboard (Tailwind + Lucide)
+
+```bash
+cd dashboard/react-dashboard
+npm install
+npm run dev
+```
 
 ## Terminal Live Dashboard
 
