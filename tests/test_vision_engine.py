@@ -21,7 +21,7 @@ class _FakeModel:
         self._boxes = boxes
         self.last_track_kwargs: dict[str, object] = {}
 
-    def track(self, frame, **kwargs):  # noqa: ANN001
+    def track(self, frame: np.ndarray, **kwargs: object) -> list[_FakeResult]:
         self.last_track_kwargs = kwargs
         return [_FakeResult(self._boxes)]
 
