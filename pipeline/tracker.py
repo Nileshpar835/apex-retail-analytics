@@ -141,9 +141,23 @@ def detect_staff(frame, bbox: tuple[float, float, float, float], billing_ratio: 
 
     crop = frame[y1:y2, x1:x2]
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    purple_mask = cv2.inRange(hsv, np.array([125, 40, 40]), np.array([165, 255, 255]))
-    purple_ratio = float(purple_mask.mean()) / 255.0
-    if purple_ratio > 0.18 or billing_ratio > 0.75:
-        confidence = min(0.95, 0.55 + purple_ratio)
+    dark_mask = (hsv[:, :, 2] < 75) & (hsv[:, :, 1] < 70)
+    dark_ratio = float(np.mean(dark_mask))
+    split_index = dark_mask.shape[0] // 2
+    upper_dark_ratio = float(np.mean(dark_mask[:split_index, :])) if split_index > 0 else 0.0
+    lower_dark_ratio = float(np.mean(dark_mask[split_index:, :])) if split_index < dark_mask.shape[0] else 0.0
+
+    upper_threshold = 0.45 if billing_ratio < 0.5 else 0.42
+    lower_threshold = 0.45 if billing_ratio < 0.5 else 0.42
+    overall_threshold = 0.42 if billing_ratio < 0.5 else 0.38
+
+    is_staff = (
+        upper_dark_ratio >= upper_threshold
+        and lower_dark_ratio >= lower_threshold
+        and dark_ratio >= overall_threshold
+    )
+    if is_staff:
+        confidence = min(0.95, 0.55 + ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / 3.0) * 0.4)
         return True, confidence
-    return False, 0.65
+    confidence = max(0.35, min(0.8, 0.7 - ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / 3.0) * 0.3))
+    return False, confidence

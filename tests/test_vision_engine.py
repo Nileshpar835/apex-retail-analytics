@@ -26,14 +26,23 @@ class _FakeModel:
         return [_FakeResult(self._boxes)]
 
 
-def test_classify_staff_uses_dark_ratio_in_lower_70_percent():
+def test_classify_staff_requires_dark_upper_and_lower_outfit():
     frame = np.full((120, 120, 3), 255, dtype=np.uint8)
     x1, y1, x2, y2 = 20, 20, 100, 100
-    lower_70_start = y1 + int((y2 - y1) * 0.3)
-    frame[lower_70_start:y2, x1:x2] = 0
+    frame[y1:y2, x1:x2] = 0
 
     engine = VisionEngine(model=_FakeModel([]))
     assert engine.classify_staff(frame, (x1, y1, x2, y2)) == "STAFF"
+
+
+def test_classify_staff_rejects_partial_black_outfit():
+    frame = np.full((120, 120, 3), 255, dtype=np.uint8)
+    x1, y1, x2, y2 = 20, 20, 100, 100
+    split = y1 + ((y2 - y1) // 2)
+    frame[y1:split, x1:x2] = 0
+
+    engine = VisionEngine(model=_FakeModel([]))
+    assert engine.classify_staff(frame, (x1, y1, x2, y2)) == "CUSTOMER"
 
 
 def test_process_frame_tracks_people_only_and_assigns_zone():

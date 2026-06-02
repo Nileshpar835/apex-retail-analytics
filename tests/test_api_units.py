@@ -100,14 +100,23 @@ def test_normalized_center():
     assert normalized_center((0, 0, 100, 200), 200, 400) == (0.25, 0.25)
 
 
-def test_detect_staff_on_purple_patch():
+def test_detect_staff_on_full_black_outfit():
     import numpy as np
 
-    frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    frame[:, :] = (130, 80, 180)
+    frame = np.full((100, 100, 3), 255, dtype=np.uint8)
+    frame[10:90, 10:60] = (0, 0, 0)
     is_staff, confidence = detect_staff(frame, (10, 10, 60, 90), billing_ratio=0.0)
     assert is_staff is True
     assert confidence > 0.5
+
+
+def test_detect_staff_rejects_half_black_outfit():
+    import numpy as np
+
+    frame = np.full((100, 100, 3), 255, dtype=np.uint8)
+    frame[10:50, 10:60] = (0, 0, 0)
+    is_staff, _ = detect_staff(frame, (10, 10, 60, 90), billing_ratio=0.0)
+    assert is_staff is False
 
 
 @pytest.mark.asyncio

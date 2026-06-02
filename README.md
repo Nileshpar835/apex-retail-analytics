@@ -134,3 +134,53 @@ store-intelligence/
 - [x] `POST /events/ingest` accepts batches
 - [x] `GET /stores/STORE_BLR_002/metrics` returns JSON
 - [x] `DESIGN.md` and `CHOICES.md` included
+
+## Complete Deployment Guide
+
+### 1) Local production-like deployment (Docker)
+
+```bash
+git clone <your-repo-url>
+cd apex-retail-analytics
+docker compose up --build -d
+docker compose ps
+```
+
+Verify:
+- API health: `curl http://localhost:8000/health`
+- Metrics: `curl http://localhost:8000/stores/STORE_BLR_002/metrics`
+- Dashboards: `http://localhost:8501` and `http://localhost:5173`
+
+### 2) Run detection pipeline and ingest events
+
+```bash
+python pipeline/detect.py --store-id STORE_BLR_002 --ingest-url http://localhost:8000
+```
+
+This generates events and pushes them to `/events/ingest`.
+
+### 3) Cloud VM deployment (Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin git
+sudo usermod -aG docker $USER
+newgrp docker
+git clone <your-repo-url>
+cd apex-retail-analytics
+docker compose up --build -d
+```
+
+Open inbound ports:
+- `8000` (API)
+- `8501` (Python dashboard)
+- `5173` (React dashboard)
+
+Use a reverse proxy (Nginx/Caddy) for TLS in public environments.
+
+### 4) Operations and troubleshooting
+
+- Logs: `docker compose logs -f api`
+- Restart services: `docker compose restart`
+- Rebuild after code updates: `docker compose up --build -d`
+- Stop stack: `docker compose down`

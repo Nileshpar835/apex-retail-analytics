@@ -54,7 +54,7 @@ class VisionEngine:
 
     def classify_staff(self, frame: np.ndarray, bbox: tuple[float, float, float, float]) -> str:
         """
-        Classify as STAFF if >65% dark pixels (V<40) in lower 70% bbox region, else CUSTOMER.
+        Classify as STAFF when both upper and lower body are predominantly dark.
         """
         x1, y1, x2, y2 = map(int, bbox)
         frame_h, frame_w = frame.shape[:2]
@@ -67,15 +67,25 @@ class VisionEngine:
         if crop.size == 0:
             return "CUSTOMER"
 
-        torso_legs_start = int(crop.shape[0] * 0.3)
-        torso_legs = crop[torso_legs_start:, :]
-        if torso_legs.size == 0:
+        if crop.shape[0] < 2:
+            return "CUSTOMER"
+        split_index = crop.shape[0] // 2
+        upper = crop[:split_index, :]
+        lower = crop[split_index:, :]
+        if upper.size == 0 or lower.size == 0:
             return "CUSTOMER"
 
-        hsv = cv2.cvtColor(torso_legs, cv2.COLOR_BGR2HSV)
-        value_channel = hsv[:, :, 2]
-        dark_ratio = float(np.mean(value_channel < 40))
-        return "STAFF" if dark_ratio > 0.65 else "CUSTOMER"
+        upper_hsv = cv2.cvtColor(upper, cv2.COLOR_BGR2HSV)
+        lower_hsv = cv2.cvtColor(lower, cv2.COLOR_BGR2HSV)
+        upper_dark_ratio = float(np.mean((upper_hsv[:, :, 2] < 75) & (upper_hsv[:, :, 1] < 70)))
+        lower_dark_ratio = float(np.mean((lower_hsv[:, :, 2] < 75) & (lower_hsv[:, :, 1] < 70)))
+        overall_hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        overall_dark_ratio = float(np.mean((overall_hsv[:, :, 2] < 75) & (overall_hsv[:, :, 1] < 70)))
+        return (
+            "STAFF"
+            if upper_dark_ratio > 0.45 and lower_dark_ratio > 0.45 and overall_dark_ratio > 0.42
+            else "CUSTOMER"
+        )
 
     def _resolve_zone(self, camera: str, feet: tuple[float, float], frame_shape: tuple[int, ...]) -> str:
         camera_zones = self.camera_polygons.get(camera, {})

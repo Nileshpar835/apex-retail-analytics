@@ -140,18 +140,23 @@ class PersonTracker:
         # Convert to HSV
         hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
         
-        # Look for dark colors: very low brightness (V < 80) and low saturation (S < 60)
-        # This indicates black or very dark clothing
-        dark_mask = (hsv[:, :, 2] < 80) & (hsv[:, :, 1] < 60)
+        # Look for dark colors: low brightness and low saturation.
+        dark_mask = (hsv[:, :, 2] < 75) & (hsv[:, :, 1] < 70)
         dark_ratio = np.sum(dark_mask) / (dark_mask.size + 1e-6)
         
-        # Check upper half for dark clothing (uniform area)
-        upper_half = dark_mask[:dark_mask.shape[0]//2, :]
+        # Require both upper and lower body to be dark (full black outfit).
+        split_index = dark_mask.shape[0] // 2
+        upper_half = dark_mask[:split_index, :]
+        lower_half = dark_mask[split_index:, :]
         upper_dark_ratio = np.sum(upper_half) / (upper_half.size + 1e-6)
+        lower_dark_ratio = np.sum(lower_half) / (lower_half.size + 1e-6)
         
-        # Staff detection: at least 35% of upper body is very dark
-        # AND overall person is at least 25% dark
-        is_staff = upper_dark_ratio > 0.35 and dark_ratio > 0.25
+        # Staff detection for black upper + lower uniform.
+        is_staff = (
+            upper_dark_ratio > 0.45
+            and lower_dark_ratio > 0.45
+            and dark_ratio > 0.42
+        )
         
         return is_staff
     

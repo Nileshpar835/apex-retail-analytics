@@ -29,6 +29,34 @@ class CameraFeed:
         """Check if video is available."""
         return self.cap.isOpened()
 
+    def _classify_staff_customer(self, frame: np.ndarray, bbox: tuple[int, int, int, int]) -> tuple[bool, str]:
+        x1, y1, x2, y2 = bbox
+        x1 = max(0, min(x1, frame.shape[1] - 1))
+        y1 = max(0, min(y1, frame.shape[0] - 1))
+        x2 = max(0, min(x2, frame.shape[1]))
+        y2 = max(0, min(y2, frame.shape[0]))
+        if x2 <= x1 or y2 <= y1:
+            return False, "CUSTOMER"
+
+        person_crop = frame[y1:y2, x1:x2]
+        if person_crop.shape[0] < 2 or person_crop.size == 0:
+            return False, "CUSTOMER"
+
+        split_index = person_crop.shape[0] // 2
+        upper = person_crop[:split_index, :]
+        lower = person_crop[split_index:, :]
+        if upper.size == 0 or lower.size == 0:
+            return False, "CUSTOMER"
+
+        upper_hsv = cv2.cvtColor(upper, cv2.COLOR_BGR2HSV)
+        lower_hsv = cv2.cvtColor(lower, cv2.COLOR_BGR2HSV)
+        full_hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
+        upper_dark_ratio = float(np.mean((upper_hsv[:, :, 2] < 75) & (upper_hsv[:, :, 1] < 70)))
+        lower_dark_ratio = float(np.mean((lower_hsv[:, :, 2] < 75) & (lower_hsv[:, :, 1] < 70)))
+        overall_dark_ratio = float(np.mean((full_hsv[:, :, 2] < 75) & (full_hsv[:, :, 1] < 70)))
+        is_staff = upper_dark_ratio > 0.45 and lower_dark_ratio > 0.45 and overall_dark_ratio > 0.42
+        return is_staff, ("STAFF" if is_staff else "CUSTOMER")
+
     def get_frame_with_detections(self) -> tuple[bytes, int, int, list]:
         """Get next frame with YOLO detections.
         
@@ -61,23 +89,24 @@ class CameraFeed:
                 cls_id = int(box.cls[0])
                 cls_name = result.names[cls_id]
 
-                # Draw bounding box
-                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(
-                    frame_resized,
-                    f"{cls_name} {conf:.2f}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2,
-                )
+                is_staff = False
+                role = None
+                color = (0, 255, 0)
+                if cls_name == "person":
+                    is_staff, role = self._classify_staff_customer(frame_resized, (x1, y1, x2, y2))
+                    color = (180, 60, 255) if is_staff else (0, 255, 0)
+
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
+                text = f"{cls_name} {conf:.2f}" if role is None else f"{role} {conf:.2f}"
+                cv2.putText(frame_resized, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 detections.append(
                     {
                         "class": cls_name,
                         "confidence": conf,
                         "bbox": [x1, y1, x2, y2],
+                        "is_staff": is_staff if cls_name == "person" else None,
+                        "role": role if cls_name == "person" else "OBJECT",
                     }
                 )
 
