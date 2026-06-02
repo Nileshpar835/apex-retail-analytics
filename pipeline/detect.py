@@ -62,10 +62,14 @@ def process_camera(
     )
     registry = VisitorRegistry()
     tracks: dict[int, TrackState] = {}
+    track_aliases: dict[int, int] = {}
+    lost_tracks: dict[int, tuple[int, tuple[float, float]]] = {}
     events: list[dict] = []
     billing_queue = 0
     frame_index = 0
     processed = 0
+    max_lost_frames = 30
+    merge_radius = 0.08
 
     model = None
     if use_yolo:
@@ -122,9 +126,29 @@ def process_camera(
         for bbox, confidence, track_id in detections:
             if track_id is None:
                 continue
-            active_track_ids.add(track_id)
             center = normalized_center(bbox, width, height)
-            signature = registry.signature(bbox, frame)
+
+            canonical_track_id = track_aliases.get(track_id)
+            if canonical_track_id is None:
+                if track_id in tracks:
+                    canonical_track_id = track_id
+                else:
+                    best_match_track_id = None
+                    best_distance = merge_radius
+                    for lost_track_id, (lost_frame, lost_center) in lost_tracks.items():
+                        if frame_index - lost_frame > max_lost_frames:
+                            continue
+                        distance = ((center[0] - lost_center[0]) ** 2 + (center[1] - lost_center[1]) ** 2) ** 0.5
+                        if distance <= best_distance:
+                            best_distance = distance
+                            best_match_track_id = lost_track_id
+                    if best_match_track_id is not None:
+                        canonical_track_id = best_match_track_id
+                        track_aliases[track_id] = canonical_track_id
+                        lost_tracks.pop(best_match_track_id, None)
+                    else:
+                        canonical_track_id = track_id
+            active_track_ids.add(canonical_track_id)
 
             in_billing = any(
                 zone["zone_id"] == "BILLING"
@@ -133,164 +157,166 @@ def process_camera(
             )
             is_staff, staff_conf = detect_staff(frame, bbox, 1.0 if in_billing and role == "billing" else 0.0)
 
-            if track_id not in tracks:
-                visitor_id, reentry = registry.resolve_visitor(track_id, signature, timestamp, is_staff=is_staff)
-                tracks[track_id] = TrackState(
-                    track_id=track_id,
+            if canonical_track_id not in tracks:
+                signature = registry.signature(bbox, frame)
+                visitor_id, reentry = registry.resolve_visitor(canonical_track_id, signature, timestamp, is_staff=is_staff)
+                tracks[canonical_track_id] = TrackState(
+                    track_id=canonical_track_id,
                     visitor_id=visitor_id,
                     is_staff=is_staff,
                     appearance_hash=signature,
+                    pending_reentry=(reentry == "REENTRY"),
                 )
-                if role == "entry_exit" and not is_staff:
-                    if reentry == "REENTRY":
-                        events.append(
-                            emitter.emit(
-                                visitor_id=visitor_id,
-                                event_type="REENTRY",
-                                frame_index=frame_index,
-                                fps=fps,
-                                zone_id="ENTRY",
-                                confidence=confidence,
-                                is_staff=False,
-                                metadata={"sku_zone": "FOYER"},
-                            )
-                        )
-                    else:
-                        events.append(
-                            emitter.emit(
-                                visitor_id=visitor_id,
-                                event_type="ENTRY",
-                                frame_index=frame_index,
-                                fps=fps,
-                                zone_id="ENTRY",
-                                confidence=confidence,
-                                is_staff=False,
-                                metadata={"sku_zone": "FOYER"},
-                            )
-                        )
-                tracks[track_id].session_started = True
+                tracks[canonical_track_id].session_started = role != "entry_exit"
 
-            track = tracks[track_id]
+            track = tracks[canonical_track_id]
             track.is_staff = track.is_staff or is_staff
+            track.last_seen_frame = frame_index
+            track.centers.append(center)
 
-            if entry_line and role == "entry_exit" and not track.is_staff:
-                crossing = crossed_line(track.last_center, center, entry_line)
-                if crossing == "ENTRY" and not track.session_started:
+            if entry_line and role == "entry_exit" and not track.is_staff and not track.crossing_counted and len(track.centers) >= 6:
+                crossing = crossed_line(track.centers[0], track.centers[-1], entry_line)
+                if crossing == "IN":
                     events.append(
                         emitter.emit(
                             visitor_id=track.visitor_id,
-                            event_type="ENTRY",
+                            event_type="REENTRY" if track.pending_reentry else "ENTRY",
                             frame_index=frame_index,
                             fps=fps,
                             zone_id="ENTRY",
                             confidence=confidence,
+                            is_staff=False,
                             metadata={"sku_zone": "FOYER"},
                         )
                     )
                     track.session_started = True
-                elif crossing == "EXIT" and track.session_started:
-                    events.append(
-                        emitter.emit(
-                            visitor_id=track.visitor_id,
-                            event_type="EXIT",
-                            frame_index=frame_index,
-                            fps=fps,
-                            zone_id="ENTRY",
-                            confidence=confidence,
-                            metadata={"sku_zone": "FOYER"},
+                    track.crossing_counted = True
+                    track.pending_reentry = False
+                elif crossing == "OUT":
+                    if track.session_started:
+                        events.append(
+                            emitter.emit(
+                                visitor_id=track.visitor_id,
+                                event_type="EXIT",
+                                frame_index=frame_index,
+                                fps=fps,
+                                zone_id="ENTRY",
+                                confidence=confidence,
+                                is_staff=False,
+                                metadata={"sku_zone": "FOYER"},
+                            )
                         )
-                    )
-                    registry.mark_exit(track.appearance_hash, track.visitor_id, timestamp)
-                    track.exited = True
+                        registry.mark_exit(track.appearance_hash, track.visitor_id, timestamp)
+                        track.exited = True
+                    track.crossing_counted = True
 
             current_zones = set()
             for zone in zones:
                 if point_in_polygon(center[0], center[1], zone["polygon"]):
                     current_zones.add(zone["zone_id"])
 
-            for zone_id in current_zones - track.current_zones:
-                metadata = {"sku_zone": next((z["sku_zone"] for z in zones if z["zone_id"] == zone_id), zone_id)}
-                events.append(
-                    emitter.emit(
-                        visitor_id=track.visitor_id,
-                        event_type="ZONE_ENTER",
-                        frame_index=frame_index,
-                        fps=fps,
-                        zone_id=zone_id,
-                        confidence=max(confidence, staff_conf if track.is_staff else confidence),
-                        is_staff=track.is_staff,
-                        metadata=metadata,
-                    )
-                )
-                track.zone_enter_frame[zone_id] = frame_index
-                track.last_dwell_emit[zone_id] = frame_index
-                if zone_id == "BILLING" and billing_queue > 0 and not track.is_staff:
+            if not track.is_staff:
+                for zone_id in current_zones - track.current_zones:
+                    metadata = {"sku_zone": next((z["sku_zone"] for z in zones if z["zone_id"] == zone_id), zone_id)}
                     events.append(
                         emitter.emit(
                             visitor_id=track.visitor_id,
-                            event_type="BILLING_QUEUE_JOIN",
-                            frame_index=frame_index,
-                            fps=fps,
-                            zone_id="BILLING",
-                            confidence=confidence,
-                            metadata={"queue_depth": billing_queue, "sku_zone": "CHECKOUT"},
-                        )
-                    )
-                    track.billing_joined = True
-
-            for zone_id in track.current_zones - current_zones:
-                events.append(
-                    emitter.emit(
-                        visitor_id=track.visitor_id,
-                        event_type="ZONE_EXIT",
-                        frame_index=frame_index,
-                        fps=fps,
-                        zone_id=zone_id,
-                        confidence=confidence,
-                        is_staff=track.is_staff,
-                        metadata={"sku_zone": zone_id},
-                    )
-                )
-                if zone_id == "BILLING" and track.billing_joined and not track.is_staff:
-                    events.append(
-                        emitter.emit(
-                            visitor_id=track.visitor_id,
-                            event_type="BILLING_QUEUE_ABANDON",
-                            frame_index=frame_index,
-                            fps=fps,
-                            zone_id="BILLING",
-                            confidence=confidence,
-                            metadata={"sku_zone": "CHECKOUT"},
-                        )
-                    )
-                    track.billing_joined = False
-
-            for zone_id in current_zones:
-                entered_frame = track.zone_enter_frame.get(zone_id, frame_index)
-                dwell_frames = frame_index - track.last_dwell_emit.get(zone_id, entered_frame)
-                dwell_seconds = (dwell_frames * frame_stride) / fps
-                if dwell_seconds >= 30:
-                    dwell_ms = int(dwell_seconds * 1000)
-                    events.append(
-                        emitter.emit(
-                            visitor_id=track.visitor_id,
-                            event_type="ZONE_DWELL",
+                            event_type="ZONE_ENTER",
                             frame_index=frame_index,
                             fps=fps,
                             zone_id=zone_id,
-                            dwell_ms=dwell_ms,
                             confidence=confidence,
-                            is_staff=track.is_staff,
+                            is_staff=False,
+                            metadata=metadata,
+                        )
+                    )
+                    track.zone_enter_frame[zone_id] = frame_index
+                    track.zone_entry_time[zone_id] = timestamp
+                    if zone_id == "BILLING" and billing_queue > 0:
+                        events.append(
+                            emitter.emit(
+                                visitor_id=track.visitor_id,
+                                event_type="BILLING_QUEUE_JOIN",
+                                frame_index=frame_index,
+                                fps=fps,
+                                zone_id="BILLING",
+                                confidence=confidence,
+                                metadata={"queue_depth": billing_queue, "sku_zone": "CHECKOUT"},
+                            )
+                        )
+                        track.billing_joined = True
+
+            for zone_id in track.current_zones - current_zones:
+                if not track.is_staff:
+                    events.append(
+                        emitter.emit(
+                            visitor_id=track.visitor_id,
+                            event_type="ZONE_EXIT",
+                            frame_index=frame_index,
+                            fps=fps,
+                            zone_id=zone_id,
+                            confidence=confidence,
+                            is_staff=False,
                             metadata={"sku_zone": zone_id},
                         )
                     )
-                    track.last_dwell_emit[zone_id] = frame_index
+                    entered_at = track.zone_entry_time.pop(zone_id, None)
+                    if entered_at is not None:
+                        dwell_ms = int(max((timestamp - entered_at).total_seconds(), 0.0) * 1000)
+                        if dwell_ms > 0:
+                            events.append(
+                                emitter.emit(
+                                    visitor_id=track.visitor_id,
+                                    event_type="ZONE_DWELL",
+                                    frame_index=frame_index,
+                                    fps=fps,
+                                    zone_id=zone_id,
+                                    dwell_ms=dwell_ms,
+                                    confidence=confidence,
+                                    is_staff=False,
+                                    metadata={"sku_zone": zone_id},
+                                )
+                            )
+                    if zone_id == "BILLING" and track.billing_joined:
+                        events.append(
+                            emitter.emit(
+                                visitor_id=track.visitor_id,
+                                event_type="BILLING_QUEUE_ABANDON",
+                                frame_index=frame_index,
+                                fps=fps,
+                                zone_id="BILLING",
+                                confidence=confidence,
+                                metadata={"sku_zone": "CHECKOUT"},
+                            )
+                        )
+                        track.billing_joined = False
 
             track.current_zones = current_zones
             track.last_center = center
             if "BILLING" in current_zones and not track.is_staff:
-                billing_queue = max(billing_queue, len([tid for tid in active_track_ids if tid in tracks and "BILLING" in tracks[tid].current_zones]))
+                billing_queue = max(
+                    billing_queue,
+                    len(
+                        [
+                            tid
+                            for tid in active_track_ids
+                            if tid in tracks and "BILLING" in tracks[tid].current_zones and not tracks[tid].is_staff
+                        ]
+                    ),
+                )
 
+        for tracked_id, tracked in tracks.items():
+            if tracked.last_seen_frame == frame_index:
+                lost_tracks.pop(tracked_id, None)
+                continue
+            if tracked.last_center is None or tracked.exited:
+                continue
+            lost_tracks[tracked_id] = (tracked.last_seen_frame, tracked.last_center)
+        lost_tracks = {
+            tracked_id: value
+            for tracked_id, value in lost_tracks.items()
+            if frame_index - value[0] <= max_lost_frames
+        }
         frame_index += 1
 
     cap.release()

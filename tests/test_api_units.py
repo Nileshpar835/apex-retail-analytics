@@ -92,8 +92,8 @@ def test_visitor_registry_reentry():
 
 def test_crossed_line_entry_and_exit():
     line = {"x1": 0.2, "y1": 0.7, "x2": 0.8, "y2": 0.7, "inbound_direction": "up"}
-    assert crossed_line((0.5, 0.8), (0.5, 0.6), line) == "ENTRY"
-    assert crossed_line((0.5, 0.6), (0.5, 0.8), line) == "EXIT"
+    assert crossed_line((0.5, 0.8), (0.5, 0.6), line) == "IN"
+    assert crossed_line((0.5, 0.6), (0.5, 0.8), line) == "OUT"
 
 
 def test_normalized_center():
