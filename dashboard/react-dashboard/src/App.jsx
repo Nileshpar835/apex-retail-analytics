@@ -8,7 +8,9 @@ import {
 } from 'lucide-react'
 import { WebSocketService } from './services/WebSocketService'
 
-const WS_URL = 'ws://localhost:8000/ws/dashboard'
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000/ws/dashboard`
 
 function toTitle(text) {
   return String(text ?? '')
