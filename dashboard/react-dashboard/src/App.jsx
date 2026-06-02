@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ShieldAlert,
@@ -28,6 +28,7 @@ function App() {
   })
   const [people, setPeople] = useState([])
   const [securityFeed, setSecurityFeed] = useState([])
+  const alertSequenceRef = useRef(0)
 
   const wsService = useMemo(() => new WebSocketService(WS_URL), [])
 
@@ -52,11 +53,14 @@ function App() {
             event.role === 'CUSTOMER' &&
             String(event.zone_id).toLowerCase() === 'cam_4_backroom',
         )
-        .map((event) => ({
-          id: `${event.event_id}-${Date.now()}`,
-          text: `Customer detected in CAM_4_BACKROOM · ${event.visitor_id}`,
-          timestamp: new Date().toLocaleTimeString(),
-        }))
+        .map((event) => {
+          alertSequenceRef.current += 1
+          return {
+            id: `${event.event_id}-${event.visitor_id}-${alertSequenceRef.current}`,
+            text: `Customer detected in CAM_4_BACKROOM · ${event.visitor_id}`,
+            timestamp: new Date().toLocaleTimeString(),
+          }
+        })
 
       if (alerts.length) {
         setSecurityFeed((previous) => [...alerts, ...previous].slice(0, 12))
