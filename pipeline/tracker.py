@@ -4,9 +4,25 @@ import hashlib
 from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from pipeline.staff_classifier import (
+    DARK_LOWER_THRESHOLD,
+    DARK_OVERALL_THRESHOLD,
+    DARK_UPPER_THRESHOLD,
+    RELAXED_DARK_LOWER_THRESHOLD,
+    RELAXED_DARK_OVERALL_THRESHOLD,
+    RELAXED_DARK_UPPER_THRESHOLD,
+    is_black_outfit,
+)
 
 EPSILON = 1e-6
 TRACK_CENTERS_WINDOW = 6
+STAFF_CONFIDENCE_BASE = 0.55
+STAFF_CONFIDENCE_SCALE = 0.4
+CUSTOMER_CONFIDENCE_BASE = 0.7
+CUSTOMER_CONFIDENCE_SCALE = 0.3
+CUSTOMER_CONFIDENCE_MIN = 0.35
+CUSTOMER_CONFIDENCE_MAX = 0.8
+RATIO_COMPONENT_COUNT = 3.0
 
 
 def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
@@ -129,21 +145,31 @@ class VisitorRegistry:
 
 
 def detect_staff(frame, bbox: tuple[float, float, float, float], billing_ratio: float) -> tuple[bool, float]:
-    import cv2
-    import numpy as np
-
-    x1, y1, x2, y2 = map(int, bbox)
-    h, w = frame.shape[:2]
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    if x2 <= x1 or y2 <= y1:
-        return False, 0.5
-
-    crop = frame[y1:y2, x1:x2]
-    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    purple_mask = cv2.inRange(hsv, np.array([125, 40, 40]), np.array([165, 255, 255]))
-    purple_ratio = float(purple_mask.mean()) / 255.0
-    if purple_ratio > 0.18 or billing_ratio > 0.75:
-        confidence = min(0.95, 0.55 + purple_ratio)
+    """Detect staff wearing black upper+lower outfit and return (is_staff, confidence)."""
+    # Billing views can produce stronger reflections and partial occlusions, so
+    # thresholds are slightly relaxed when billing occupancy is substantial.
+    relaxed = billing_ratio >= 0.5
+    is_staff, ratios = is_black_outfit(
+        frame,
+        bbox,
+        upper_threshold=RELAXED_DARK_UPPER_THRESHOLD if relaxed else DARK_UPPER_THRESHOLD,
+        lower_threshold=RELAXED_DARK_LOWER_THRESHOLD if relaxed else DARK_LOWER_THRESHOLD,
+        overall_threshold=RELAXED_DARK_OVERALL_THRESHOLD if relaxed else DARK_OVERALL_THRESHOLD,
+    )
+    upper_dark_ratio, lower_dark_ratio, dark_ratio = ratios
+    if is_staff:
+        confidence = min(
+            0.95,
+            STAFF_CONFIDENCE_BASE
+            + ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / RATIO_COMPONENT_COUNT) * STAFF_CONFIDENCE_SCALE,
+        )
         return True, confidence
-    return False, 0.65
+    confidence = max(
+        CUSTOMER_CONFIDENCE_MIN,
+        min(
+            CUSTOMER_CONFIDENCE_MAX,
+            CUSTOMER_CONFIDENCE_BASE
+            - ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / RATIO_COMPONENT_COUNT) * CUSTOMER_CONFIDENCE_SCALE,
+        ),
+    )
+    return False, confidence

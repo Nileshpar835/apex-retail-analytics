@@ -17,6 +17,7 @@ import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import EventRecord
+from pipeline.staff_classifier import is_black_outfit
 
 logger = logging.getLogger(__name__)
 
@@ -130,29 +131,7 @@ class PersonTracker:
         Returns:
             True if appears to be wearing black uniform
         """
-        x1, y1, x2, y2 = [int(v) for v in signature.bbox]
-        person_crop = frame[max(0, y1):min(frame.shape[0], y2),
-                           max(0, x1):min(frame.shape[1], x2)]
-        
-        if person_crop.size == 0:
-            return False
-        
-        # Convert to HSV
-        hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
-        
-        # Look for dark colors: very low brightness (V < 80) and low saturation (S < 60)
-        # This indicates black or very dark clothing
-        dark_mask = (hsv[:, :, 2] < 80) & (hsv[:, :, 1] < 60)
-        dark_ratio = np.sum(dark_mask) / (dark_mask.size + 1e-6)
-        
-        # Check upper half for dark clothing (uniform area)
-        upper_half = dark_mask[:dark_mask.shape[0]//2, :]
-        upper_dark_ratio = np.sum(upper_half) / (upper_half.size + 1e-6)
-        
-        # Staff detection: at least 35% of upper body is very dark
-        # AND overall person is at least 25% dark
-        is_staff = upper_dark_ratio > 0.35 and dark_ratio > 0.25
-        
+        is_staff, _ = is_black_outfit(frame, signature.bbox)
         return is_staff
     
     def calculate_color_similarity(

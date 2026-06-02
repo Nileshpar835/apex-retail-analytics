@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from pipeline.staff_classifier import is_black_outfit
 
 
 class CameraFeed:
@@ -28,6 +29,11 @@ class CameraFeed:
     def is_available(self) -> bool:
         """Check if video is available."""
         return self.cap.isOpened()
+
+    def _classify_staff_customer(self, frame: np.ndarray, bbox: tuple[int, int, int, int]) -> tuple[bool, str]:
+        """Return (is_staff, role) for a detected person bbox in the current frame."""
+        is_staff, _ = is_black_outfit(frame, bbox)
+        return is_staff, ("STAFF" if is_staff else "CUSTOMER")
 
     def get_frame_with_detections(self) -> tuple[bytes, int, int, list]:
         """Get next frame with YOLO detections.
@@ -61,23 +67,24 @@ class CameraFeed:
                 cls_id = int(box.cls[0])
                 cls_name = result.names[cls_id]
 
-                # Draw bounding box
-                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(
-                    frame_resized,
-                    f"{cls_name} {conf:.2f}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2,
-                )
+                is_staff = False
+                role = None
+                color = (0, 255, 0)
+                if cls_name == "person":
+                    is_staff, role = self._classify_staff_customer(frame_resized, (x1, y1, x2, y2))
+                    color = (180, 60, 255) if is_staff else (0, 255, 0)
+
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
+                text = f"{cls_name} {conf:.2f}" if role is None else f"{role} {conf:.2f}"
+                cv2.putText(frame_resized, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 detections.append(
                     {
                         "class": cls_name,
                         "confidence": conf,
                         "bbox": [x1, y1, x2, y2],
+                        "is_staff": is_staff if cls_name == "person" else None,
+                        "role": role if cls_name == "person" else None,
                     }
                 )
 

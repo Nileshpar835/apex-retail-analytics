@@ -6,6 +6,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+from pipeline.staff_classifier import is_black_outfit
 
 DEFAULT_CAMERA_POLYGONS: dict[str, dict[str, list[tuple[float, float]]]] = {
     "CAM 1": {
@@ -54,7 +55,7 @@ class VisionEngine:
 
     def classify_staff(self, frame: np.ndarray, bbox: tuple[float, float, float, float]) -> str:
         """
-        Classify as STAFF if >65% dark pixels (V<40) in lower 70% bbox region, else CUSTOMER.
+        Classify as STAFF when both upper and lower body are predominantly dark.
         """
         x1, y1, x2, y2 = map(int, bbox)
         frame_h, frame_w = frame.shape[:2]
@@ -67,15 +68,8 @@ class VisionEngine:
         if crop.size == 0:
             return "CUSTOMER"
 
-        torso_legs_start = int(crop.shape[0] * 0.3)
-        torso_legs = crop[torso_legs_start:, :]
-        if torso_legs.size == 0:
-            return "CUSTOMER"
-
-        hsv = cv2.cvtColor(torso_legs, cv2.COLOR_BGR2HSV)
-        value_channel = hsv[:, :, 2]
-        dark_ratio = float(np.mean(value_channel < 40))
-        return "STAFF" if dark_ratio > 0.65 else "CUSTOMER"
+        is_staff, _ = is_black_outfit(frame, (x1, y1, x2, y2))
+        return "STAFF" if is_staff else "CUSTOMER"
 
     def _resolve_zone(self, camera: str, feet: tuple[float, float], frame_shape: tuple[int, ...]) -> str:
         camera_zones = self.camera_polygons.get(camera, {})
