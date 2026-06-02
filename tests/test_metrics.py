@@ -62,6 +62,16 @@ async def test_funnel_monotonic_counts(client):
 
 
 @pytest.mark.asyncio
+async def test_revenue_summary_endpoint(client):
+    response = await client.get(f"/stores/{STORE_ID}/revenue-summary")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["store_id"] == STORE_ID
+    assert body["transaction_count"] > 0
+    assert body["total_revenue_inr"] > 0
+
+
+@pytest.mark.asyncio
 async def test_heatmap_confidence_flag(client):
     response = await client.get(f"/stores/{STORE_ID}/heatmap")
     assert response.status_code == 200

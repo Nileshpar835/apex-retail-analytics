@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import PosTransactionRecord, parse_iso_timestamp
 from app.ingestion import fetch_store_events
 from app.metrics import build_sessions, event_date, filter_events_for_date, utc_today
-from app.models import FunnelResponse, FunnelStage
+from app.models import FunnelResponse, FunnelStage, resolve_store_aliases
 
 
 def session_reached_zone(events: list, zone_id: str) -> bool:
@@ -57,7 +57,7 @@ async def session_converted(
         return False
 
     pos_result = await session.execute(
-        select(PosTransactionRecord).where(PosTransactionRecord.store_id == store_id)
+        select(PosTransactionRecord).where(PosTransactionRecord.store_id.in_(resolve_store_aliases(store_id)))
     )
     transactions = list(pos_result.scalars().all())
     window = timedelta(minutes=conversion_window_minutes)
@@ -99,10 +99,20 @@ async def get_store_funnel(
     }
 
     entry_count = len(entry_sessions)
-    zone_count = sum(1 for visitor_events in entry_sessions.values() if session_reached_any_zone(visitor_events))
-    billing_count = sum(1 for visitor_events in entry_sessions.values() if session_reached_billing(visitor_events))
+    zone_visitor_ids: set[str] = set()
+    billing_visitor_ids: set[str] = set()
+    for visitor_id, visitor_events in entry_sessions.items():
+        if session_reached_any_zone(visitor_events):
+            zone_visitor_ids.add(visitor_id)
+        if session_reached_billing(visitor_events):
+            billing_visitor_ids.add(visitor_id)
+    bill_after_zone_ids = zone_visitor_ids & billing_visitor_ids
+
+    zone_count = len(zone_visitor_ids)
+    billing_count = len(bill_after_zone_ids)
     purchase_count = 0
-    for visitor_events in entry_sessions.values():
+    for visitor_id in bill_after_zone_ids:
+        visitor_events = entry_sessions[visitor_id]
         if await session_converted(session, store_id, visitor_events):
             purchase_count += 1
 

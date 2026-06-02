@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import EventRecord, PosTransactionRecord, parse_iso_timestamp
 from app.ingestion import fetch_store_events, parse_metadata
-from app.models import Settings, StoreMetricsResponse, ZoneMetric, get_settings
+from app.models import Settings, StoreMetricsResponse, ZoneMetric, get_settings, resolve_store_aliases
 
 
 def utc_today() -> str:
@@ -75,7 +75,7 @@ async def compute_conversion_rate(
         return 0.0, visitors
 
     pos_result = await session.execute(
-        select(PosTransactionRecord).where(PosTransactionRecord.store_id == store_id)
+        select(PosTransactionRecord).where(PosTransactionRecord.store_id.in_(resolve_store_aliases(store_id)))
     )
     transactions = list(pos_result.scalars().all())
     converted: set[str] = set()

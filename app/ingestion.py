@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import EventRecord
-from app.models import IngestResponse, StoreEvent
+from app.models import IngestResponse, StoreEvent, resolve_store_aliases
 from app.tracking import enhance_visitor_id_with_appearance, get_tracker
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,8 @@ async def fetch_store_events(
     *,
     customer_only: bool = True,
 ) -> list[EventRecord]:
-    query = select(EventRecord).where(EventRecord.store_id == store_id)
+    aliases = resolve_store_aliases(store_id)
+    query = select(EventRecord).where(EventRecord.store_id.in_(aliases))
     if customer_only:
         query = query.where(EventRecord.is_staff.is_(False))
     query = query.order_by(EventRecord.timestamp.asc())
