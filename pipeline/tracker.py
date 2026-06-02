@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from collections import deque
 from datetime import datetime, timedelta, timezone
+
+EPSILON = 1e-6
+TRACK_CENTERS_WINDOW = 6
 
 
 def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
@@ -33,25 +37,24 @@ def crossed_line(
     x1, y1, x2, y2 = line["x1"], line["y1"], line["x2"], line["y2"]
     px, py = prev_center
     cx, cy = center
-    line_y = (y1 + y2) / 2
+    line_vec_x, line_vec_y = x2 - x1, y2 - y1
+
+    prev_side = line_vec_x * (py - y1) - line_vec_y * (px - x1)
+    curr_side = line_vec_x * (cy - y1) - line_vec_y * (cx - x1)
+    if abs(prev_side) < EPSILON or abs(curr_side) < EPSILON:
+        return None
+    if prev_side * curr_side > 0:
+        return None
+
+    move_x, move_y = cx - px, cy - py
+    movement_cross = line_vec_x * move_y - line_vec_y * move_x
+    if abs(movement_cross) < EPSILON:
+        return None
+
     direction = line.get("inbound_direction", "up")
-    crossed = (px >= line_y and cy < line_y) or (px <= line_y and cy > line_y) if x1 != x2 else False
-    if abs(py - line_y) <= 0.02 or abs(cy - line_y) <= 0.02:
-        crossed = True
-    if not crossed:
-        if direction == "up" and py >= line_y > cy:
-            return "ENTRY"
-        if direction == "up" and py <= line_y < cy:
-            return "EXIT"
-        if direction == "down" and py <= line_y < cy:
-            return "ENTRY"
-        if direction == "down" and py >= line_y > cy:
-            return "EXIT"
-    else:
-        if direction == "up":
-            return "ENTRY" if cy < py else "EXIT"
-        return "ENTRY" if cy > py else "EXIT"
-    return None
+    in_on_negative_cross = direction in {"up", "left"}
+    moving_inside = movement_cross < 0 if in_on_negative_cross else movement_cross > 0
+    return "IN" if moving_inside else "OUT"
 
 
 @dataclass
@@ -63,11 +66,14 @@ class TrackState:
     exited: bool = False
     last_center: tuple[float, float] | None = None
     current_zones: set[str] = field(default_factory=set)
-    zone_enter_frame: dict[str, int] = field(default_factory=dict)
-    last_dwell_emit: dict[str, int] = field(default_factory=dict)
+    zone_entry_time: dict[str, datetime] = field(default_factory=dict)
     billing_joined: bool = False
     session_started: bool = False
     appearance_hash: str = ""
+    last_seen_frame: int = -1
+    crossing_counted: bool = False
+    centers: deque[tuple[float, float]] = field(default_factory=lambda: deque(maxlen=TRACK_CENTERS_WINDOW))
+    pending_reentry: bool = False
 
 
 @dataclass
