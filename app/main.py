@@ -6,6 +6,7 @@ import logging
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import get_store_anomalies, get_store_heatmap
@@ -25,9 +26,11 @@ from app.models import (
     IngestResponse,
     StoreMetricsResponse,
     get_settings,
+    resolve_store_aliases,
 )
 from app.realtime import RealtimeAnalyticsService
 from app.tracking import get_tracker
+from app.database import PosTransactionRecord
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
             redis_client,
             settings.vision_events_path,
             publish_interval_seconds=settings.realtime_publish_interval_seconds,
+            store_layout_path=settings.store_layout_path,
         )
         await realtime_service.start()
     except Exception:
@@ -142,6 +146,27 @@ async def metrics_endpoint(
 ) -> StoreMetricsResponse:
     _ensure_db()
     return await get_store_metrics(session, store_id)
+
+
+@app.get("/stores/{store_id}/revenue-summary")
+async def revenue_summary_endpoint(
+    store_id: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, float | int | str]:
+    _ensure_db()
+    aliases = resolve_store_aliases(store_id)
+    result = await session.execute(
+        select(
+            func.count(PosTransactionRecord.transaction_id),
+            func.coalesce(func.sum(PosTransactionRecord.basket_value_inr), 0.0),
+        ).where(PosTransactionRecord.store_id.in_(aliases))
+    )
+    transaction_count, total_revenue_inr = result.one()
+    return {
+        "store_id": store_id,
+        "transaction_count": int(transaction_count or 0),
+        "total_revenue_inr": round(float(total_revenue_inr or 0.0), 2),
+    }
 
 
 @app.get("/stores/{store_id}/funnel", response_model=FunnelResponse)

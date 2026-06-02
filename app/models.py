@@ -153,3 +153,18 @@ def load_store_layout(path: str | None = None) -> dict[str, Any]:
 def get_store_ids() -> list[str]:
     layout = load_store_layout()
     return [store["store_id"] for store in layout["stores"]]
+
+
+def resolve_store_aliases(store_id: str) -> set[str]:
+    aliases = {store_id}
+    layout = load_store_layout()
+    for store in layout.get("stores", []):
+        primary = str(store.get("store_id", "")).strip()
+        legacy = str(store.get("legacy_store_id", "")).strip()
+        if store_id in {primary, legacy}:
+            if primary:
+                aliases.add(primary)
+            if legacy:
+                aliases.add(legacy)
+            break
+    return aliases

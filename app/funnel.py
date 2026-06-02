@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import PosTransactionRecord, parse_iso_timestamp
 from app.ingestion import fetch_store_events
 from app.metrics import build_sessions, event_date, filter_events_for_date, utc_today
-from app.models import FunnelResponse, FunnelStage
+from app.models import FunnelResponse, FunnelStage, resolve_store_aliases
 
 
 def session_reached_zone(events: list, zone_id: str) -> bool:
@@ -57,7 +57,7 @@ async def session_converted(
         return False
 
     pos_result = await session.execute(
-        select(PosTransactionRecord).where(PosTransactionRecord.store_id == store_id)
+        select(PosTransactionRecord).where(PosTransactionRecord.store_id.in_(resolve_store_aliases(store_id)))
     )
     transactions = list(pos_result.scalars().all())
     window = timedelta(minutes=conversion_window_minutes)

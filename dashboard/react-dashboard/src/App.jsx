@@ -3,20 +3,41 @@ import {
   Activity,
   ShieldAlert,
   ShoppingCart,
+  Video,
   UserRoundCheck,
   Users,
 } from 'lucide-react'
 import { WebSocketService } from './services/WebSocketService'
 
-const WS_URL =
-  import.meta.env.VITE_WS_URL ||
-  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000/ws/dashboard`
+const API_BASE = import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`
+const STORE_ID = import.meta.env.VITE_STORE_ID || 'STORE_BLR_002'
+const WS_URL = import.meta.env.VITE_WS_URL || `${API_BASE.replace(/^http/i, 'ws')}/ws/dashboard`
+
+function normalizeCameraId(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replaceAll(' ', '_')
+}
 
 function toTitle(text) {
   return String(text ?? '')
     .replaceAll('_', ' ')
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0))
+}
+
+function zoneColor(index) {
+  const palette = ['#22c55e', '#38bdf8', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6']
+  return palette[index % palette.length]
 }
 
 function App() {
@@ -28,7 +49,9 @@ function App() {
     queue_length: 0,
     zone_occupancy: { CAM_1: 0, CAM_2: 0 },
   })
-  const [people, setPeople] = useState([])
+  const [revenueSummary, setRevenueSummary] = useState({ total_revenue_inr: 0, transaction_count: 0 })
+  const [cameras, setCameras] = useState([])
+  const [cameraPolygons, setCameraPolygons] = useState({})
   const [securityFeed, setSecurityFeed] = useState([])
   const alertSequenceRef = useRef(0)
 
@@ -39,15 +62,6 @@ function App() {
       if (payload.metrics) setMetrics(payload.metrics)
       const events = payload.events || []
       if (!events.length) return
-
-      setPeople((previous) => {
-        const byVisitor = new Map(previous.map((person) => [person.visitor_id, person]))
-        events.forEach((event) => {
-          if (typeof event.x !== 'number' || typeof event.y !== 'number') return
-          byVisitor.set(event.visitor_id, event)
-        })
-        return Array.from(byVisitor.values()).slice(-80)
-      })
 
       const alerts = events
         .filter(
@@ -79,6 +93,73 @@ function App() {
     }
   }, [wsService])
 
+  useEffect(() => {
+    let cancelled = false
+    const loadCamerasAndLayout = async () => {
+      try {
+        const [camerasResponse, layoutResponse] = await Promise.all([
+          fetch(`${API_BASE}/cameras`),
+          fetch(`${API_BASE}/store-layout`),
+        ])
+
+        const camerasPayload = await camerasResponse.json()
+        const layoutPayload = await layoutResponse.json()
+        if (cancelled) return
+
+        setCameras(camerasPayload.cameras || [])
+
+        const store = layoutPayload?.stores?.[0]
+        const polygonsByCamera = {}
+        ;(store?.cameras || []).forEach((camera) => {
+          const cameraId = normalizeCameraId(camera.camera_id)
+          polygonsByCamera[cameraId] = (camera.zones || [])
+            .filter((zone) => Array.isArray(zone.polygon) && zone.polygon.length >= 3)
+            .map((zone) => ({ zone_id: zone.zone_id, polygon: zone.polygon }))
+        })
+        setCameraPolygons(polygonsByCamera)
+      } catch {
+        if (!cancelled) {
+          setCameras([])
+          setCameraPolygons({})
+        }
+      }
+    }
+
+    loadCamerasAndLayout()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let timer = null
+
+    const refreshRevenue = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/stores/${STORE_ID}/revenue-summary`)
+        const payload = await response.json()
+        if (!cancelled) {
+          setRevenueSummary({
+            total_revenue_inr: payload.total_revenue_inr || 0,
+            transaction_count: payload.transaction_count || 0,
+          })
+        }
+      } catch {
+        if (!cancelled) {
+          setRevenueSummary({ total_revenue_inr: 0, transaction_count: 0 })
+        }
+      }
+    }
+
+    refreshRevenue()
+    timer = setInterval(refreshRevenue, 10000)
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
+  }, [])
+
   const kpis = [
     {
       label: 'Total Footfall',
@@ -107,6 +188,12 @@ function App() {
           ? 'border-red-500 animate-pulse-border'
           : 'border-slate-700',
     },
+    {
+      label: 'Total Revenue',
+      value: formatCurrency(revenueSummary.total_revenue_inr ?? 0),
+      icon: ShoppingCart,
+      className: 'border-emerald-600',
+    },
   ]
 
   return (
@@ -122,7 +209,7 @@ function App() {
             </div>
           </header>
 
-          <section className="grid grid-cols-4 gap-3">
+          <section className="grid grid-cols-5 gap-3">
             {kpis.map(({ label, value, icon: Icon, className }) => (
               <article
                 key={label}
@@ -139,42 +226,65 @@ function App() {
 
           <section className="min-h-0 flex-1 rounded-xl border border-slate-800 bg-slate-900 p-4">
             <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">
-              Live Floor Plan
+              Live Camera Streams
             </h2>
-            <svg viewBox="0 0 1000 620" className="h-full w-full rounded-lg bg-slate-950">
-              <rect x="35" y="35" width="930" height="550" rx="12" fill="#0f172a" stroke="#334155" />
-              <rect x="60" y="60" width="420" height="240" fill="#0b1325" stroke="#334155" />
-              <text x="72" y="84" fill="#64748b" fontSize="14">
-                CAM_1
-              </text>
-              <rect x="520" y="60" width="420" height="240" fill="#0b1325" stroke="#334155" />
-              <text x="532" y="84" fill="#64748b" fontSize="14">
-                CAM_2
-              </text>
-              <rect x="60" y="335" width="420" height="230" fill="#0b1325" stroke="#334155" />
-              <text x="72" y="359" fill="#64748b" fontSize="14">
-                CAM_3
-              </text>
-              <rect x="520" y="335" width="200" height="230" fill="#111827" stroke="#334155" />
-              <text x="532" y="359" fill="#64748b" fontSize="14">
-                CAM_4_BACKROOM
-              </text>
-              <rect x="740" y="335" width="200" height="230" fill="#0b1325" stroke="#334155" />
-              <text x="752" y="359" fill="#64748b" fontSize="14">
-                CAM_5
-              </text>
-
-              {people.map((person) => (
-                <circle
-                  key={person.event_id}
-                  cx={person.x * 930 + 35}
-                  cy={person.y * 550 + 35}
-                  r="6"
-                  fill={person.role === 'STAFF' ? '#a855f7' : '#22c55e'}
-                  opacity="0.92"
-                />
-              ))}
-            </svg>
+            <div className="grid h-full auto-rows-max grid-cols-2 gap-3 overflow-auto pr-1">
+              {cameras.length === 0 && (
+                <div className="col-span-2 rounded-lg border border-slate-800 bg-slate-950 p-5 text-sm text-slate-500">
+                  No camera stream available.
+                </div>
+              )}
+              {cameras.map((camera) => {
+                const normalized = normalizeCameraId(camera)
+                const polygons = cameraPolygons[normalized] || []
+                return (
+                  <article key={camera} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                      <Video size={14} />
+                      {toTitle(camera)}
+                    </div>
+                    <div className="relative overflow-hidden rounded-md border border-slate-800">
+                      <img
+                        src={`${API_BASE}/cameras/${encodeURIComponent(camera)}/feed`}
+                        alt={camera}
+                        className="aspect-video w-full object-cover"
+                      />
+                      <svg
+                        className="pointer-events-none absolute inset-0 h-full w-full"
+                        viewBox="0 0 1000 560"
+                        preserveAspectRatio="none"
+                      >
+                        {polygons.map((zone, index) => {
+                          const color = zoneColor(index)
+                          const points = zone.polygon
+                            .map(([x, y]) => `${x * 1000},${y * 560}`)
+                            .join(' ')
+                          const center = zone.polygon.reduce(
+                            (acc, [x, y]) => [acc[0] + x, acc[1] + y],
+                            [0, 0],
+                          )
+                          const cx = (center[0] / zone.polygon.length) * 1000
+                          const cy = (center[1] / zone.polygon.length) * 560
+                          return (
+                            <g key={`${camera}-${zone.zone_id}`}>
+                              <polygon
+                                points={points}
+                                fill={`${color}1f`}
+                                stroke={color}
+                                strokeWidth="2"
+                              />
+                              <text x={cx} y={cy} fill={color} fontSize="16" textAnchor="middle">
+                                {toTitle(zone.zone_id)}
+                              </text>
+                            </g>
+                          )
+                        })}
+                      </svg>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
           </section>
         </div>
 
@@ -184,12 +294,11 @@ function App() {
             Security Feed
           </div>
           <div className="mb-4 grid grid-cols-2 gap-2 text-xs text-slate-400">
-            <div className="rounded-md border border-slate-700 bg-slate-950 p-2">
-              CAM_1 Occupancy: {metrics.zone_occupancy?.CAM_1 ?? 0}
-            </div>
-            <div className="rounded-md border border-slate-700 bg-slate-950 p-2">
-              CAM_2 Occupancy: {metrics.zone_occupancy?.CAM_2 ?? 0}
-            </div>
+            {Object.entries(metrics.zone_occupancy || {}).map(([zone, count]) => (
+              <div key={zone} className="rounded-md border border-slate-700 bg-slate-950 p-2">
+                {zone} Occupancy: {count}
+              </div>
+            ))}
           </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {securityFeed.length === 0 && (
@@ -209,6 +318,8 @@ function App() {
             <span className="text-purple-400">Staff</span>
             <br />
             Zone focus: {toTitle('cam_4_backroom')}
+            <br />
+            POS Transactions: {revenueSummary.transaction_count ?? 0}
           </footer>
         </aside>
       </div>
