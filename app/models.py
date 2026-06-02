@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     stale_feed_minutes: int = 10
     conversion_window_minutes: int = 5
     db_available: bool = True
+    redis_url: str = "redis://localhost:6379/0"
+    vision_events_path: str = "data/store_events.jsonl"
+    realtime_publish_interval_seconds: float = 0.2
 
 
 @lru_cache
