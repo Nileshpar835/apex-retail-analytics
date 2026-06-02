@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
+EPSILON = 1e-6
+
 
 def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
     inside = False
@@ -38,14 +40,14 @@ def crossed_line(
 
     prev_side = line_vec_x * (py - y1) - line_vec_y * (px - x1)
     curr_side = line_vec_x * (cy - y1) - line_vec_y * (cx - x1)
-    if abs(prev_side) < 1e-6 or abs(curr_side) < 1e-6:
+    if abs(prev_side) < EPSILON or abs(curr_side) < EPSILON:
         return None
     if prev_side * curr_side > 0:
         return None
 
     move_x, move_y = cx - px, cy - py
     movement_cross = line_vec_x * move_y - line_vec_y * move_x
-    if abs(movement_cross) < 1e-6:
+    if abs(movement_cross) < EPSILON:
         return None
 
     direction = line.get("inbound_direction", "up")

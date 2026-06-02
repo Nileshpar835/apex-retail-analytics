@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -23,6 +24,10 @@ from pipeline.tracker import (
     normalized_center,
     point_in_polygon,
 )
+
+MIN_CENTERS_FOR_CROSSING = 6
+MAX_LOST_FRAMES = 30
+MERGE_RADIUS = 0.08
 
 
 def load_layout(layout_path: Path) -> dict:
@@ -68,8 +73,6 @@ def process_camera(
     billing_queue = 0
     frame_index = 0
     processed = 0
-    max_lost_frames = 30
-    merge_radius = 0.08
 
     model = None
     if use_yolo:
@@ -134,11 +137,11 @@ def process_camera(
                     canonical_track_id = track_id
                 else:
                     best_match_track_id = None
-                    best_distance = merge_radius
+                    best_distance = MERGE_RADIUS
                     for lost_track_id, (lost_frame, lost_center) in lost_tracks.items():
-                        if frame_index - lost_frame > max_lost_frames:
+                        if frame_index - lost_frame > MAX_LOST_FRAMES:
                             continue
-                        distance = ((center[0] - lost_center[0]) ** 2 + (center[1] - lost_center[1]) ** 2) ** 0.5
+                        distance = math.hypot(center[0] - lost_center[0], center[1] - lost_center[1])
                         if distance <= best_distance:
                             best_distance = distance
                             best_match_track_id = lost_track_id
@@ -174,7 +177,7 @@ def process_camera(
             track.last_seen_frame = frame_index
             track.centers.append(center)
 
-            if entry_line and role == "entry_exit" and not track.is_staff and not track.crossing_counted and len(track.centers) >= 6:
+            if entry_line and role == "entry_exit" and not track.is_staff and not track.crossing_counted and len(track.centers) >= MIN_CENTERS_FOR_CROSSING:
                 crossing = crossed_line(track.centers[0], track.centers[-1], entry_line)
                 if crossing == "IN":
                     events.append(
@@ -315,7 +318,7 @@ def process_camera(
         lost_tracks = {
             tracked_id: value
             for tracked_id, value in lost_tracks.items()
-            if frame_index - value[0] <= max_lost_frames
+            if frame_index - value[0] <= MAX_LOST_FRAMES
         }
         frame_index += 1
 
