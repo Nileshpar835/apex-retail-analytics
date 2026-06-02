@@ -137,12 +137,12 @@ def process_camera(
                     canonical_track_id = track_id
                 else:
                     best_match_track_id = None
-                    best_distance = MERGE_RADIUS
+                    best_distance = float("inf")
                     for lost_track_id, (lost_frame, lost_center) in lost_tracks.items():
                         if frame_index - lost_frame > MAX_LOST_FRAMES:
                             continue
                         distance = math.hypot(center[0] - lost_center[0], center[1] - lost_center[1])
-                        if distance <= best_distance:
+                        if distance <= MERGE_RADIUS and distance < best_distance:
                             best_distance = distance
                             best_match_track_id = lost_track_id
                     if best_match_track_id is not None:
