@@ -18,6 +18,8 @@ Open:
 - React dashboard: http://localhost:5173
 - Metrics: http://localhost:8000/stores/STORE_BLR_002/metrics
 
+`docker compose up --build` starts all three services: API, Python dashboard, and React dashboard.
+
 ## Run Detection Pipeline on CCTV Clips
 
 Place the five CCTV files in the `data/CCTV` folder:
@@ -79,6 +81,10 @@ Environment variables:
 | `REALTIME_PUBLISH_INTERVAL_SECONDS` | `0.2` | Publish frequency for simulated events |
 
 ## React Live Dashboard (Tailwind + Lucide)
+
+Started automatically via Docker Compose at `http://localhost:5173`.
+
+To run it outside Docker:
 
 ```bash
 cd dashboard/react-dashboard
