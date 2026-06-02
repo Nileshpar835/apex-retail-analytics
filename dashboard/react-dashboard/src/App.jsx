@@ -39,6 +39,7 @@ function zoneColor(index) {
   const palette = ['#22c55e', '#38bdf8', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6']
   return palette[index % palette.length]
 }
+const ZONE_FILL_SUFFIX = '1f'
 
 function App() {
   const [status, setStatus] = useState('connecting')
@@ -259,17 +260,17 @@ function App() {
                           const points = zone.polygon
                             .map(([x, y]) => `${x * 1000},${y * 560}`)
                             .join(' ')
-                          const center = zone.polygon.reduce(
+                          const coordinateSum = zone.polygon.reduce(
                             (acc, [x, y]) => [acc[0] + x, acc[1] + y],
                             [0, 0],
                           )
-                          const cx = (center[0] / zone.polygon.length) * 1000
-                          const cy = (center[1] / zone.polygon.length) * 560
+                          const cx = (coordinateSum[0] / zone.polygon.length) * 1000
+                          const cy = (coordinateSum[1] / zone.polygon.length) * 560
                           return (
                             <g key={`${camera}-${zone.zone_id}`}>
                               <polygon
                                 points={points}
-                                fill={`${color}1f`}
+                                fill={`${color}${ZONE_FILL_SUFFIX}`}
                                 stroke={color}
                                 strokeWidth="2"
                               />

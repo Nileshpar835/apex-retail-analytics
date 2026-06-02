@@ -223,8 +223,9 @@ class RealtimeAnalyticsService:
         for i in range(len(polygon)):
             xi, yi = polygon[i]
             xj, yj = polygon[j]
+            denominator = (yj - yi) if (yj - yi) != 0 else 1e-9
             intersects = ((yi > y) != (yj > y)) and (
-                x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-9) + xi
+                x < (xj - xi) * (y - yi) / denominator + xi
             )
             if intersects:
                 inside = not inside

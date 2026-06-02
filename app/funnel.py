@@ -99,16 +99,13 @@ async def get_store_funnel(
     }
 
     entry_count = len(entry_sessions)
-    zone_visitor_ids = {
-        visitor_id
-        for visitor_id, visitor_events in entry_sessions.items()
-        if session_reached_any_zone(visitor_events)
-    }
-    billing_visitor_ids = {
-        visitor_id
-        for visitor_id, visitor_events in entry_sessions.items()
-        if session_reached_billing(visitor_events)
-    }
+    zone_visitor_ids: set[str] = set()
+    billing_visitor_ids: set[str] = set()
+    for visitor_id, visitor_events in entry_sessions.items():
+        if session_reached_any_zone(visitor_events):
+            zone_visitor_ids.add(visitor_id)
+        if session_reached_billing(visitor_events):
+            billing_visitor_ids.add(visitor_id)
     bill_after_zone_ids = zone_visitor_ids & billing_visitor_ids
 
     zone_count = len(zone_visitor_ids)
