@@ -233,7 +233,6 @@ def process_camera(
                             metadata=metadata,
                         )
                     )
-                    track.zone_enter_frame[zone_id] = frame_index
                     track.zone_entry_time[zone_id] = timestamp
                     if zone_id == "BILLING" and billing_queue > 0:
                         events.append(

@@ -6,6 +6,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 EPSILON = 1e-6
+TRACK_CENTERS_WINDOW = 6
 
 
 def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
@@ -65,15 +66,13 @@ class TrackState:
     exited: bool = False
     last_center: tuple[float, float] | None = None
     current_zones: set[str] = field(default_factory=set)
-    zone_enter_frame: dict[str, int] = field(default_factory=dict)
     zone_entry_time: dict[str, datetime] = field(default_factory=dict)
-    last_dwell_emit: dict[str, int] = field(default_factory=dict)
     billing_joined: bool = False
     session_started: bool = False
     appearance_hash: str = ""
     last_seen_frame: int = -1
     crossing_counted: bool = False
-    centers: deque[tuple[float, float]] = field(default_factory=lambda: deque(maxlen=6))
+    centers: deque[tuple[float, float]] = field(default_factory=lambda: deque(maxlen=TRACK_CENTERS_WINDOW))
     pending_reentry: bool = False
 
 
