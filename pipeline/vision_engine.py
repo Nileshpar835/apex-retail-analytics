@@ -6,6 +6,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+from pipeline.staff_classifier import is_black_outfit
 
 DEFAULT_CAMERA_POLYGONS: dict[str, dict[str, list[tuple[float, float]]]] = {
     "CAM 1": {
@@ -67,25 +68,8 @@ class VisionEngine:
         if crop.size == 0:
             return "CUSTOMER"
 
-        if crop.shape[0] < 2:
-            return "CUSTOMER"
-        split_index = crop.shape[0] // 2
-        upper = crop[:split_index, :]
-        lower = crop[split_index:, :]
-        if upper.size == 0 or lower.size == 0:
-            return "CUSTOMER"
-
-        upper_hsv = cv2.cvtColor(upper, cv2.COLOR_BGR2HSV)
-        lower_hsv = cv2.cvtColor(lower, cv2.COLOR_BGR2HSV)
-        upper_dark_ratio = float(np.mean((upper_hsv[:, :, 2] < 75) & (upper_hsv[:, :, 1] < 70)))
-        lower_dark_ratio = float(np.mean((lower_hsv[:, :, 2] < 75) & (lower_hsv[:, :, 1] < 70)))
-        overall_hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        overall_dark_ratio = float(np.mean((overall_hsv[:, :, 2] < 75) & (overall_hsv[:, :, 1] < 70)))
-        return (
-            "STAFF"
-            if upper_dark_ratio > 0.45 and lower_dark_ratio > 0.45 and overall_dark_ratio > 0.42
-            else "CUSTOMER"
-        )
+        is_staff, _ = is_black_outfit(frame, (x1, y1, x2, y2))
+        return "STAFF" if is_staff else "CUSTOMER"
 
     def _resolve_zone(self, camera: str, feet: tuple[float, float], frame_shape: tuple[int, ...]) -> str:
         camera_zones = self.camera_polygons.get(camera, {})

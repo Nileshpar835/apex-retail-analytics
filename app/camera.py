@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from pipeline.staff_classifier import is_black_outfit
 
 
 class CameraFeed:
@@ -30,31 +31,7 @@ class CameraFeed:
         return self.cap.isOpened()
 
     def _classify_staff_customer(self, frame: np.ndarray, bbox: tuple[int, int, int, int]) -> tuple[bool, str]:
-        x1, y1, x2, y2 = bbox
-        x1 = max(0, min(x1, frame.shape[1] - 1))
-        y1 = max(0, min(y1, frame.shape[0] - 1))
-        x2 = max(0, min(x2, frame.shape[1]))
-        y2 = max(0, min(y2, frame.shape[0]))
-        if x2 <= x1 or y2 <= y1:
-            return False, "CUSTOMER"
-
-        person_crop = frame[y1:y2, x1:x2]
-        if person_crop.shape[0] < 2 or person_crop.size == 0:
-            return False, "CUSTOMER"
-
-        split_index = person_crop.shape[0] // 2
-        upper = person_crop[:split_index, :]
-        lower = person_crop[split_index:, :]
-        if upper.size == 0 or lower.size == 0:
-            return False, "CUSTOMER"
-
-        upper_hsv = cv2.cvtColor(upper, cv2.COLOR_BGR2HSV)
-        lower_hsv = cv2.cvtColor(lower, cv2.COLOR_BGR2HSV)
-        full_hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
-        upper_dark_ratio = float(np.mean((upper_hsv[:, :, 2] < 75) & (upper_hsv[:, :, 1] < 70)))
-        lower_dark_ratio = float(np.mean((lower_hsv[:, :, 2] < 75) & (lower_hsv[:, :, 1] < 70)))
-        overall_dark_ratio = float(np.mean((full_hsv[:, :, 2] < 75) & (full_hsv[:, :, 1] < 70)))
-        is_staff = upper_dark_ratio > 0.45 and lower_dark_ratio > 0.45 and overall_dark_ratio > 0.42
+        is_staff, _ = is_black_outfit(frame, bbox)
         return is_staff, ("STAFF" if is_staff else "CUSTOMER")
 
     def get_frame_with_detections(self) -> tuple[bytes, int, int, list]:
@@ -106,7 +83,7 @@ class CameraFeed:
                         "confidence": conf,
                         "bbox": [x1, y1, x2, y2],
                         "is_staff": is_staff if cls_name == "person" else None,
-                        "role": role if cls_name == "person" else "OBJECT",
+                        "role": role if cls_name == "person" else None,
                     }
                 )
 
