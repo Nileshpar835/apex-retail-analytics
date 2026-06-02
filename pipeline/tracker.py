@@ -22,6 +22,7 @@ CUSTOMER_CONFIDENCE_BASE = 0.7
 CUSTOMER_CONFIDENCE_SCALE = 0.3
 CUSTOMER_CONFIDENCE_MIN = 0.35
 CUSTOMER_CONFIDENCE_MAX = 0.8
+RATIO_COMPONENT_COUNT = 3.0
 
 
 def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
@@ -144,6 +145,9 @@ class VisitorRegistry:
 
 
 def detect_staff(frame, bbox: tuple[float, float, float, float], billing_ratio: float) -> tuple[bool, float]:
+    """Detect staff wearing black upper+lower outfit and return (is_staff, confidence)."""
+    # Billing views can produce stronger reflections and partial occlusions, so
+    # thresholds are slightly relaxed when billing occupancy is substantial.
     relaxed = billing_ratio >= 0.5
     is_staff, ratios = is_black_outfit(
         frame,
@@ -156,7 +160,8 @@ def detect_staff(frame, bbox: tuple[float, float, float, float], billing_ratio: 
     if is_staff:
         confidence = min(
             0.95,
-            STAFF_CONFIDENCE_BASE + ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / 3.0) * STAFF_CONFIDENCE_SCALE,
+            STAFF_CONFIDENCE_BASE
+            + ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / RATIO_COMPONENT_COUNT) * STAFF_CONFIDENCE_SCALE,
         )
         return True, confidence
     confidence = max(
@@ -164,7 +169,7 @@ def detect_staff(frame, bbox: tuple[float, float, float, float], billing_ratio: 
         min(
             CUSTOMER_CONFIDENCE_MAX,
             CUSTOMER_CONFIDENCE_BASE
-            - ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / 3.0) * CUSTOMER_CONFIDENCE_SCALE,
+            - ((upper_dark_ratio + lower_dark_ratio + dark_ratio) / RATIO_COMPONENT_COUNT) * CUSTOMER_CONFIDENCE_SCALE,
         ),
     )
     return False, confidence

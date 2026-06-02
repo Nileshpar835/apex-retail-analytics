@@ -171,6 +171,8 @@ cd apex-retail-analytics
 docker compose up --build -d
 ```
 
+`docker-compose-plugin` provides the `docker compose` command used above.
+
 Open inbound ports:
 - `8000` (API)
 - `8501` (Python dashboard)

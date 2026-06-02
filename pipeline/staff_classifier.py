@@ -19,6 +19,7 @@ RELAXED_DARK_OVERALL_THRESHOLD = 0.38
 
 
 def dark_outfit_ratios(frame: np.ndarray, bbox: tuple[int | float, int | float, int | float, int | float]) -> tuple[float, float, float]:
+    """Return dark-pixel ratios (upper, lower, overall) for a person bbox in a frame."""
     x1, y1, x2, y2 = map(int, bbox)
     h, w = frame.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
@@ -33,7 +34,7 @@ def dark_outfit_ratios(frame: np.ndarray, bbox: tuple[int | float, int | float, 
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     dark_mask = (hsv[:, :, 2] < DARK_VALUE_MAX) & (hsv[:, :, 1] < DARK_SATURATION_MAX)
     split_index = dark_mask.shape[0] // 2
-    if split_index == 0 or split_index == dark_mask.shape[0]:
+    if split_index == 0:
         return 0.0, 0.0, 0.0
 
     upper_ratio = float(np.mean(dark_mask[:split_index, :]))
@@ -50,6 +51,7 @@ def is_black_outfit(
     lower_threshold: float = DARK_LOWER_THRESHOLD,
     overall_threshold: float = DARK_OVERALL_THRESHOLD,
 ) -> tuple[bool, tuple[float, float, float]]:
+    """Classify staff by requiring dark upper+lower clothing and return (is_staff, ratios)."""
     upper_ratio, lower_ratio, overall_ratio = dark_outfit_ratios(frame, bbox)
     is_staff = (
         upper_ratio >= upper_threshold

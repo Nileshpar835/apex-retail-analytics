@@ -31,6 +31,7 @@ class CameraFeed:
         return self.cap.isOpened()
 
     def _classify_staff_customer(self, frame: np.ndarray, bbox: tuple[int, int, int, int]) -> tuple[bool, str]:
+        """Return (is_staff, role) for a detected person bbox in the current frame."""
         is_staff, _ = is_black_outfit(frame, bbox)
         return is_staff, ("STAFF" if is_staff else "CUSTOMER")
 
