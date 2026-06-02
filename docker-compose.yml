@@ -6,8 +6,11 @@ services:
     environment:
       DATABASE_URL: sqlite+aiosqlite:///./data/store_intel.db
       DB_AVAILABLE: "true"
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./data:/app/data
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8000/health', timeout=5).raise_for_status()"]
       interval: 15s
@@ -27,3 +30,8 @@ services:
       STORE_ID: STORE_BLR_002
     volumes:
       - ./dashboard:/app/dashboard
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import get_store_anomalies, get_store_heatmap
@@ -24,17 +26,20 @@ from app.models import (
     StoreMetricsResponse,
     get_settings,
 )
+from app.realtime import RealtimeAnalyticsService
 from app.tracking import get_tracker
 from fastapi.middleware.cors import CORSMiddleware
 
 
+logger = logging.getLogger(__name__)
 
 camera_manager: CameraManager | None = None
+realtime_service: RealtimeAnalyticsService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global camera_manager
+    global camera_manager, realtime_service
     configure_logging()
     settings = get_settings()
     await init_db(settings)
@@ -49,9 +54,32 @@ async def lifespan(app: FastAPI):
         data_dir=str(cctv_dir),
         model_path=str(model_path) if model_path.exists() else "yolov8n.pt"
     )
+
+    redis_client: Redis | None = None
+    try:
+        redis_client = Redis.from_url(
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+        await redis_client.ping()
+        realtime_service = RealtimeAnalyticsService(
+            redis_client,
+            settings.vision_events_path,
+            publish_interval_seconds=settings.realtime_publish_interval_seconds,
+        )
+        await realtime_service.start()
+    except Exception:
+        logger.exception("Realtime stream disabled because Redis initialization failed")
+        realtime_service = None
+        if redis_client:
+            await redis_client.close()
+
     yield
     
     # Cleanup
+    if realtime_service:
+        await realtime_service.stop()
     if camera_manager:
         camera_manager.close_all()
 
@@ -288,3 +316,15 @@ async def store_layout_endpoint() -> dict:
         layout_data = json.load(f)
     
     return layout_data
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_websocket(websocket: WebSocket) -> None:
+    await websocket.accept()
+    if not realtime_service:
+        await websocket.send_json(
+            {"error": "realtime_unavailable", "message": "Redis realtime stream is unavailable."}
+        )
+        await websocket.close(code=1013)
+        return
+    await realtime_service.stream_dashboard(websocket)
