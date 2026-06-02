@@ -99,10 +99,23 @@ async def get_store_funnel(
     }
 
     entry_count = len(entry_sessions)
-    zone_count = sum(1 for visitor_events in entry_sessions.values() if session_reached_any_zone(visitor_events))
-    billing_count = sum(1 for visitor_events in entry_sessions.values() if session_reached_billing(visitor_events))
+    zone_visitor_ids = {
+        visitor_id
+        for visitor_id, visitor_events in entry_sessions.items()
+        if session_reached_any_zone(visitor_events)
+    }
+    billing_visitor_ids = {
+        visitor_id
+        for visitor_id, visitor_events in entry_sessions.items()
+        if session_reached_billing(visitor_events)
+    }
+    bill_after_zone_ids = zone_visitor_ids & billing_visitor_ids
+
+    zone_count = len(zone_visitor_ids)
+    billing_count = len(bill_after_zone_ids)
     purchase_count = 0
-    for visitor_events in entry_sessions.values():
+    for visitor_id in bill_after_zone_ids:
+        visitor_events = entry_sessions[visitor_id]
         if await session_converted(session, store_id, visitor_events):
             purchase_count += 1
 
